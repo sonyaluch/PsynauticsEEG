@@ -1,0 +1,14 @@
+# Raw and derived EEG data -- contains participant emails and biosignal data
+data/
+output/
+
+# Local tooling: gcloud CLI install + its OAuth config/credentials
+tools/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# OS
+.DS_Store
