@@ -1,4 +1,6 @@
-# Muse EEG Pipeline
+# PsynauticsEEG
+
+EEG analysis for the Psynautics at-home study.
 
 Preprocessing pipeline for resting-state EEG collected with Muse S (Gen 2)
 headbands as part of the Psynautics protocol: an 11-day citizen-neuroscience
