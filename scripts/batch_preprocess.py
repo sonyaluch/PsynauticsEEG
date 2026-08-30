@@ -56,11 +56,6 @@ EXCLUDED_SESSION_HASHES = {
     "4f310879923e49c6a6345562049ecb40": "Sub_16 BASELINE_EEG_1, 40% dropout across 8 gaps (repeated BLE disconnects)",
 }
 
-# Recordings kept, but with one known-bad channel marked in raw.info["bads"]
-# rather than excluding the whole file -- the other channels are usable.
-BAD_CHANNELS_BY_SESSION_HASH = {
-    "89931d7915b9475baa86a27f08fec5a3": ["AF7"],  # Sub_38 POST_EEG_1, saturated/clipping electrode
-}
 
 
 def find_raw_csvs(input_dir: Path) -> list[Path]:
@@ -83,6 +78,12 @@ def main() -> None:
     args.outdir.mkdir(parents=True, exist_ok=True)
     fif_dir = args.outdir / "clean_raw"
     fif_dir.mkdir(exist_ok=True)
+    # Clear stale outputs from prior runs -- otherwise a recording that used
+    # to succeed and later gets added to EXCLUDED_SESSION_HASHES (or starts
+    # failing for some other reason) leaves its old .fif sitting here
+    # indefinitely, silently picked up by anything that reads this directory.
+    for stale in fif_dir.glob("*_clean_raw.fif"):
+        stale.unlink()
 
     manifest = load_manifest(args.manifest) if args.manifest else None
     participant_key = load_participant_key(args.participant_key) if args.participant_key else {}
@@ -124,15 +125,15 @@ def main() -> None:
         }
         try:
             raw, load_report = load_muse_csv(path)
-            bad_channels = BAD_CHANNELS_BY_SESSION_HASH.get(session_hash, [])
-            raw.info["bads"] = bad_channels
             raw_clean, prep_report = preprocess_raw(raw)
+            bad_channels = prep_report.globally_bad_channels
 
             out_name = f"{subject_code}_{module_id or 'UNKNOWN'}_{session_hash or path.stem}_clean_raw.fif"
             raw_clean.save(fif_dir / out_name, overwrite=True, verbose=False)
 
             result.update(
                 duration_s=load_report.duration_s,
+                n_nan_dropped=load_report.n_nan_dropped,
                 n_dropouts=load_report.n_dropouts,
                 pct_dropout=load_report.pct_dropout,
                 max_gap_s=load_report.max_gap_s,

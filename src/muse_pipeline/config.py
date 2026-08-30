@@ -65,12 +65,73 @@ BANDPASS_HIGH_HZ = 40.0
 # handled defensively in preprocess.py.
 NOTCH_FREQS_HZ = [60.0]
 
+# ASSUMPTION: a channel is "globally bad" for the WHOLE recording (not just
+# a transient window) if its overall MAD is far higher than its sibling
+# channels'. EMPIRICAL BASIS: known-clean recordings show ~2x spread across
+# per-channel MAD; recordings with a visually-confirmed bad electrode (poor
+# contact for the whole session) show 12-140x. 5x sits clear of both and is
+# how these get caught -- the per-window artifact check below normalizes
+# each channel against its OWN whole-recording baseline, so it's blind to a
+# channel that's uniformly noisy throughout (no clean baseline to compare
+# against within that channel).
+GLOBAL_BAD_CHANNEL_MAD_RATIO = 5.0
+
 # --- Artifact rejection ------------------------------------------------------
 # Robust (MAD-based) z-score threshold for flagging short windows as
 # artifact, applied per channel on top of dropout annotations. Chosen to be
 # conservative given raw units are not confirmed to be calibrated uV.
 ARTIFACT_WINDOW_S = 1.0
 ARTIFACT_MAD_ZSCORE_THRESH = 5.0
+
+# --- Marker extraction -------------------------------------------------------
+# ASSUMPTION: none of these formulas/parameters are confirmed against a
+# Psynautics protocol spec -- they're standard choices from the EEG
+# literature, chosen so the markers are well-defined and reproducible while
+# a real spec is tracked down. Revisit each if a documented spec turns up.
+
+# Fixed-length, non-overlapping epochs for windowed spectral/entropy
+# estimation. 4s is a common resting-state EEG epoch length -- long enough
+# for stable band-power and entropy estimates, short enough that a 5-10min
+# baseline recording still yields ~75-150 epochs. Epochs overlapping any
+# BAD_* annotation are dropped entirely (via MNE's reject_by_annotation).
+MARKER_EPOCH_S = 4.0
+
+FREQ_BANDS_HZ = {
+    "delta": (1.0, 4.0),
+    "theta": (4.0, 8.0),
+    "alpha": (8.0, 13.0),
+    "beta": (13.0, 30.0),
+    "gamma": (30.0, 40.0),
+}
+
+# ASSUMPTION: beta-band (13-30Hz) power at AF8 as the "Cognition" scalar --
+# beta is the standard EEG correlate of active cognitive engagement /
+# concentration in consumer-EEG literature (cf. Muse's own attention
+# scoring, Pope et al. 1995 engagement index components). Frontal theta is
+# the other common candidate (cognitive-load paradigms); swap COGNITION_BAND
+# if the protocol turns out to mean that instead.
+COGNITION_CHANNEL = "AF8"
+COGNITION_BAND = "beta"
+
+# ASSUMPTION: frontal alpha asymmetry (Davidson's approach-withdrawal
+# paradigm), computed as ln(right alpha power) - ln(left alpha power) =
+# ln(AF8) - ln(AF7). Alpha is an "idling" rhythm (less alpha = more cortical
+# activity), so a positive value means relatively greater LEFT frontal
+# activation, associated with approach-oriented / positive affect in this
+# paradigm; negative = withdrawal / negative affect.
+EMOTION_LEFT_CHANNEL = "AF7"
+EMOTION_RIGHT_CHANNEL = "AF8"
+EMOTION_BAND = "alpha"
+
+# ASSUMPTION: "Awareness" = mean of normalized Lempel-Ziv complexity (LZC)
+# and normalized permutation entropy (PE), averaged across all 4 channels
+# and all epochs. Both are standard complexity/entropy measures used as EEG
+# consciousness/awareness proxies in the anesthesia-depth and meditation
+# literature. LZC needs a binary sequence -- each epoch is binarized via a
+# per-epoch median split (x >= median(x)), the standard approach for
+# continuous-valued signals per antropy's own documentation.
+PERM_ENTROPY_ORDER = 3
+PERM_ENTROPY_DELAY = 1
 
 # --- Filename metadata parsing ----------------------------------------------
 # e.g. 2026_Feb_files_eeg_<email>_<date>_<time>_<utc_offset>_<hash>_eeg.csv

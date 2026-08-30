@@ -7,12 +7,11 @@ headbands as part of the Psynautics protocol: an 11-day citizen-neuroscience
 study with baseline (Days 1-5), treatment (Day 6), and post-treatment (Days
 7-11) recordings, 4 channels (TP9, AF7, AF8, TP10).
 
-The end goal is three derived markers per recording -- **Cognition** (AF8
-frontal spectral power), **Emotion** (AF7/AF8 alpha asymmetry), and
-**Awareness** (Lempel-Ziv complexity / permutation entropy across all 4
-channels) -- but marker extraction isn't implemented yet. This repo currently
-covers loading, cleaning, and QC-flagging raw exports into ready-to-analyze
-MNE `Raw` objects.
+Three derived markers are extracted per recording -- **Cognition** (AF8 beta-
+band power), **Emotion** (AF7/AF8 alpha asymmetry), and **Awareness** (mean
+of normalized Lempel-Ziv complexity and permutation entropy, across all 4
+channels). This repo covers the full path from raw CSV export to those three
+scalars: loading, cleaning, QC-flagging, and marker extraction.
 
 ## What it does
 
@@ -41,18 +40,40 @@ With only 4 channels, ICA and spherical-spline interpolation are unreliable
 everything is left as `BAD_*` annotations or `raw.info["bads"]` channel
 flags, and it's up to downstream analysis to decide what to exclude.
 
+Additionally, a channel that's uniformly bad for the *whole* recording (e.g.
+persistently poor electrode contact) is auto-detected and added to
+`raw.info["bads"]`: its overall MAD is compared against its sibling
+channels', since the per-window check above only catches anomalies relative
+to a channel's own baseline and is blind to a channel that's bad throughout.
+
+Marker extraction (`src/muse_pipeline/markers.py`) then epochs the cleaned
+signal into fixed 4s windows (dropping any epoch overlapping a `BAD_*`
+annotation) and computes, per recording:
+
+- **Cognition**: mean beta-band (13-30Hz) power at AF8.
+- **Emotion**: `ln(AF8 alpha power) - ln(AF7 alpha power)` (frontal alpha
+  asymmetry).
+- **Awareness**: mean of normalized Lempel-Ziv complexity and normalized
+  permutation entropy, across all 4 channels.
+
+A marker whose required channel(s) are in `raw.info["bads"]` is reported as
+unavailable rather than computed on incomplete data.
+
 ## Layout
 
 ```
 src/muse_pipeline/
-  config.py      shared constants -- channel mapping, thresholds, unit conversion
+  config.py      shared constants -- channel mapping, thresholds, unit conversion, marker params
   io.py          CSV loading, resampling, dropout detection
-  preprocess.py  filtering, artifact-window flagging
+  preprocess.py  filtering, artifact-window flagging, global bad-channel detection
+  markers.py     Cognition / Emotion / Awareness extraction
   manifest.py    cross-references the Psynautics export manifest + participant key
   qc.py          PSD / annotated-trace QC plots
 scripts/
-  run_preprocess.py     single-file CLI
-  batch_preprocess.py   batch CLI across a directory tree, manifest-aware
+  run_preprocess.py     single-file preprocessing CLI
+  batch_preprocess.py   batch preprocessing CLI across a directory tree, manifest-aware
+  extract_markers.py    batch marker extraction over preprocessed .fif files
+  make_qc_figures.py    cohort-level QC summary figures from batch_qc_summary.csv
 ```
 
 `data/`, `output/`, and `tools/` (gcloud CLI + credentials) are gitignored --
@@ -92,19 +113,29 @@ export manifest for participant/module metadata:
 `--eeg-only` restricts to the 11 resting-state EEG modules (baseline/
 treatment/post) and skips sleep, questionnaire, and clinic-info modules that
 also appear in the manifest. A single bad file logs an error and is skipped
--- it doesn't abort the run. Output: `clean_raw/*.fif` per recording plus one
-aggregate `batch_qc_summary.csv` (duration, dropout %, artifact %, bad
-channels, pass/fail) across the whole batch.
+-- it doesn't abort the run. The `clean_raw/` output directory is cleared at
+the start of each run so a file excluded on a later run can't leave a stale
+`.fif` behind. Output: `clean_raw/*.fif` per recording plus one aggregate
+`batch_qc_summary.csv` (duration, dropout %, artifact %, bad channels,
+pass/fail) across the whole batch.
 
-`batch_preprocess.py` also hardcodes two small manual overrides discovered
-during cohort QC, both documented inline at the top of the script:
+`batch_preprocess.py` also hardcodes one small manual override discovered
+during cohort QC, documented inline at the top of the script:
+`EXCLUDED_SESSION_HASHES` -- whole files excluded outright (e.g. a
+"5-minute baseline" recording that actually ran 20+ hours with 99% dropout --
+a device left on unattended, not real resting-state data). Per-channel bad
+flags are no longer a manual list; they're auto-detected (see above).
 
-- `EXCLUDED_SESSION_HASHES` -- whole files excluded outright (e.g. a
-  "5-minute baseline" recording that actually ran 20+ hours with 99%
-  dropout -- a device left on unattended, not real resting-state data).
-- `BAD_CHANNELS_BY_SESSION_HASH` -- files kept, but with one channel marked
-  bad (e.g. a saturated/clipping electrode) rather than discarding the
-  whole recording.
+Then extract markers from the preprocessed files:
+
+```bash
+./.venv/bin/python scripts/extract_markers.py \
+  --input-dir output/batch_full/clean_raw \
+  --outdir output/batch_full
+```
+
+Output: one `marker_summary.csv` row per recording (Cognition/Emotion/
+Awareness, or blank where a required channel was unavailable).
 
 ## Data access
 
@@ -131,3 +162,12 @@ the data rather than confirmed against Muse/Psynautics documentation:
 - `ch5`/`ch6` are unused aux columns, optional, and ignored when empty; a
   file where they contain real data doesn't match the expected 4-channel
   EEG-only export and is excluded rather than guessed at.
+- A channel is "globally bad" for a whole recording if its overall MAD is
+  more than 5x its sibling channels' -- chosen empirically and confirmed by
+  eye against annotated-trace plots across the threshold range, not against
+  a physiological calibration.
+- The marker formulas themselves (Cognition = AF8 beta power, Emotion =
+  frontal alpha asymmetry, Awareness = LZC + permutation entropy) are
+  standard EEG-literature choices, not confirmed Psynautics protocol specs
+  -- see the `ASSUMPTION` comments in `config.py` for the reasoning and
+  citations behind each.

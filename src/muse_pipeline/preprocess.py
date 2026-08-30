@@ -26,6 +26,27 @@ class PreprocessReport:
     n_artifact_windows: int
     n_dropout_windows: int
     per_channel_flagged_windows: dict[str, int]
+    globally_bad_channels: list[str]
+
+
+def _detect_globally_bad_channels(raw: mne.io.RawArray) -> list[str]:
+    """Flag a channel bad for the WHOLE recording if its overall MAD is far
+    higher than its sibling channels' -- see GLOBAL_BAD_CHANNEL_MAD_RATIO in
+    config.py for the empirical basis. This catches persistently poor
+    electrode contact for an entire session, which the per-window artifact
+    check below cannot: that check normalizes each channel against its own
+    whole-recording baseline, so a channel that's uniformly noisy throughout
+    has no clean baseline within itself to look anomalous against.
+    """
+    data = raw.get_data()
+    medians = np.median(data, axis=1)
+    mads = np.median(np.abs(data - medians[:, None]), axis=1)
+    bad = []
+    for i, ch in enumerate(raw.ch_names):
+        other_mads = np.delete(mads, i)
+        if mads[i] > config.GLOBAL_BAD_CHANNEL_MAD_RATIO * np.median(other_mads):
+            bad.append(ch)
+    return bad
 
 
 def _flag_artifact_windows(raw: mne.io.RawArray) -> tuple[list[tuple[float, float, str]], dict[str, int]]:
@@ -92,11 +113,23 @@ def preprocess_raw(raw: mne.io.RawArray) -> tuple[mne.io.RawArray, PreprocessRep
     if notch:
         raw.notch_filter(notch, verbose=False)
 
+    # Defense-in-depth: a NaN anywhere in the signal at this point would
+    # silently poison every downstream computation that touches it (band
+    # power, entropy, ...) without ever showing up as a BAD_* annotation.
+    # io.py already strips NaN source samples before interpolation for
+    # exactly this reason -- this is a loud backstop in case some other
+    # export variant introduces NaN by a path that check doesn't cover.
+    if np.isnan(raw.get_data()).any():
+        raise ValueError("NaN present in signal before filtering -- check the loader for an unhandled data gap.")
+
     raw.filter(
         l_freq=config.BANDPASS_LOW_HZ,
         h_freq=config.BANDPASS_HIGH_HZ,
         verbose=False,
     )
+
+    globally_bad = _detect_globally_bad_channels(raw)
+    raw.info["bads"] = sorted(set(raw.info["bads"]) | set(globally_bad))
 
     artifact_annots, per_channel_flags = _flag_artifact_windows(raw)
     if artifact_annots:
@@ -116,5 +149,6 @@ def preprocess_raw(raw: mne.io.RawArray) -> tuple[mne.io.RawArray, PreprocessRep
         n_artifact_windows=len(artifact_annots),
         n_dropout_windows=n_dropout,
         per_channel_flagged_windows=per_channel_flags,
+        globally_bad_channels=globally_bad,
     )
     return raw, report

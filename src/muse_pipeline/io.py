@@ -36,6 +36,7 @@ class LoadReport:
 
     path: Path
     n_raw_samples: int
+    n_nan_dropped: int
     duration_s: float
     n_dropouts: int
     total_dropout_s: float
@@ -108,6 +109,20 @@ def load_muse_csv(path: str | Path) -> tuple[mne.io.RawArray, LoadReport]:
             "format and is excluded rather than processed."
         )
 
+    # Some exports contain a handful of NaN readings on individual channels --
+    # a sensor read glitch, not a BLE gap (the packet has a valid timestamp
+    # but a missing/corrupt channel value). Left in place, a NaN poisons
+    # np.interp's output around it, and FIR filtering later spreads that into
+    # a much wider NaN block (its convolution window) well beyond the
+    # original bad sample -- observed as a 32s NaN gap in one recording from
+    # just 12 raw NaN samples, completely unflagged by any annotation.
+    # Dropping the affected rows folds this into the existing dropout path:
+    # if enough consecutive rows are affected, the resulting timestamp gap is
+    # picked up by _find_dropouts and annotated BAD_dropout like any other.
+    n_before_nan_drop = len(df)
+    df = df.dropna(subset=list(config.RAW_TO_MUSE_CHANNEL))
+    n_nan_dropped = n_before_nan_drop - len(df)
+
     df = df.sort_values("ts").drop_duplicates(subset="ts").reset_index(drop=True)
     ts = df["ts"].to_numpy(dtype=np.float64)
     if len(ts) < 2:
@@ -163,6 +178,7 @@ def load_muse_csv(path: str | Path) -> tuple[mne.io.RawArray, LoadReport]:
     report = LoadReport(
         path=path,
         n_raw_samples=len(ts),
+        n_nan_dropped=n_nan_dropped,
         duration_s=duration_s,
         n_dropouts=len(dropouts),
         total_dropout_s=total_dropout_s,
