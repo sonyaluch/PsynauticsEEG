@@ -1,10 +1,8 @@
 #!/usr/bin/env python
 """
-Batch-preprocess all raw Muse EEG CSV exports found under a directory tree,
-cross-referencing the Psynautics export manifest for participant/module
-metadata, and producing one aggregate QC summary CSV across the whole
-cohort. A single bad file logs an error and is skipped -- it does not abort
-the run.
+Batch-preprocess all raw Muse EEG CSV exports found under a directory tree.
+Cross-reference export manifest for participant/module metadata.
+Producing one aggregate QC summary CSV across the whole cohort.
 
 Usage:
     .venv/bin/python scripts/batch_preprocess.py \
