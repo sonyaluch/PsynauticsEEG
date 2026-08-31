@@ -7,6 +7,9 @@ so this pipeline deliberately avoids both. Instead it:
   - band-pass + notch filters the continuous signal
   - flags short bad windows per-channel using a robust (MAD-based) z-score,
     which doesn't require assuming a calibrated physical unit
+  - flags short windows contaminated by muscle (EMG) artifact via spectral
+    shape (high/low frequency power ratio), which the amplitude-based check
+    above can miss -- EMG doesn't always produce an outlier amplitude spike
   - leaves rejection to annotation (BAD_*), so downstream epoching can use
     `reject_by_annotation=True` rather than discarding whole channels
 """
@@ -25,7 +28,9 @@ class PreprocessReport:
     pct_annotated_bad: float
     n_artifact_windows: int
     n_dropout_windows: int
+    n_emg_windows: int
     per_channel_flagged_windows: dict[str, int]
+    per_channel_emg_flagged_windows: dict[str, int]
     globally_bad_channels: list[str]
 
 
@@ -44,7 +49,14 @@ def _detect_globally_bad_channels(raw: mne.io.RawArray) -> list[str]:
     bad = []
     for i, ch in enumerate(raw.ch_names):
         other_mads = np.delete(mads, i)
-        if mads[i] > config.GLOBAL_BAD_CHANNEL_MAD_RATIO * np.median(other_mads):
+        # min, not median: with only 3 "other" channels, if 2 channels are
+        # simultaneously bad (e.g. AF7+AF8, physically adjacent and both
+        # susceptible to the same frontalis muscle contraction), the median
+        # of the other 3 gets dragged up by whichever other channel is also
+        # bad, masking both. min only requires ONE of the other 3 to be
+        # genuinely clean, which holds as long as at most 3 of the 4
+        # channels are bad simultaneously.
+        if mads[i] > config.GLOBAL_BAD_CHANNEL_MAD_RATIO * np.min(other_mads):
             bad.append(ch)
     return bad
 
@@ -98,6 +110,59 @@ def _flag_artifact_windows(raw: mne.io.RawArray) -> tuple[list[tuple[float, floa
     return annotations, per_channel_flags
 
 
+def _flag_emg_windows(raw: mne.io.RawArray) -> tuple[list[tuple[float, float, str]], dict[str, int]]:
+    """Flag a window BAD_EMG if the ratio of high-frequency (20-40Hz) to
+    low-frequency (1-10Hz) power at a channel exceeds EMG_RATIO_THRESH.
+
+    Distinguishes muscle artifact from cortical activity by spectral SHAPE
+    rather than amplitude: cortical EEG has a roughly 1/f spectrum, EMG is
+    much flatter/broadband. This catches contamination the amplitude-based
+    MAD z-score check above can miss -- e.g. jaw clenching or frowning that
+    doesn't necessarily produce an outlier amplitude spike, but does flatten
+    the spectrum. See config.py for the empirical threshold basis.
+
+    Channels already in raw.info["bads"] are skipped, same as the artifact
+    check above.
+    """
+    sfreq = raw.info["sfreq"]
+    win_samples = int(round(config.ARTIFACT_WINDOW_S * sfreq))
+    data = raw.get_data()
+    n_channels, n_samples = data.shape
+    n_windows = n_samples // win_samples
+
+    freqs = np.fft.rfftfreq(win_samples, d=1.0 / sfreq)
+    low_mask = (freqs >= config.EMG_LOW_BAND_HZ[0]) & (freqs <= config.EMG_LOW_BAND_HZ[1])
+    high_mask = (freqs >= config.EMG_HIGH_BAND_HZ[0]) & (freqs <= config.EMG_HIGH_BAND_HZ[1])
+    window_fn = np.hanning(win_samples)
+
+    good_chs = [ch for ch in raw.ch_names if ch not in raw.info["bads"]]
+    per_channel_flags = {ch: 0 for ch in good_chs}
+    annotations: list[tuple[float, float, str]] = []
+
+    for w in range(n_windows):
+        start = w * win_samples
+        stop = start + win_samples
+        window_bad = False
+        for ci, ch in enumerate(raw.ch_names):
+            if ch not in good_chs:
+                continue
+            seg = data[ci, start:stop] * window_fn
+            psd = np.abs(np.fft.rfft(seg)) ** 2
+            low = psd[low_mask].mean()
+            high = psd[high_mask].mean()
+            if low <= 0:
+                continue
+            if (high / low) > config.EMG_RATIO_THRESH:
+                per_channel_flags[ch] += 1
+                window_bad = True
+        if window_bad:
+            onset = start / sfreq
+            duration = win_samples / sfreq
+            annotations.append((onset, duration, "BAD_EMG"))
+
+    return annotations, per_channel_flags
+
+
 def preprocess_raw(raw: mne.io.RawArray) -> tuple[mne.io.RawArray, PreprocessReport]:
     """Band-pass + notch filter, then annotate artifact windows on top of any
     dropout annotations already present from loading.
@@ -132,8 +197,10 @@ def preprocess_raw(raw: mne.io.RawArray) -> tuple[mne.io.RawArray, PreprocessRep
     raw.info["bads"] = sorted(set(raw.info["bads"]) | set(globally_bad))
 
     artifact_annots, per_channel_flags = _flag_artifact_windows(raw)
-    if artifact_annots:
-        onsets, durations, descriptions = zip(*artifact_annots)
+    emg_annots, per_channel_emg_flags = _flag_emg_windows(raw)
+    all_new_annots = artifact_annots + emg_annots
+    if all_new_annots:
+        onsets, durations, descriptions = zip(*all_new_annots)
         new_annots = mne.Annotations(onset=list(onsets), duration=list(durations), description=list(descriptions))
         raw.set_annotations(existing_annotations + new_annots)
 
@@ -148,7 +215,9 @@ def preprocess_raw(raw: mne.io.RawArray) -> tuple[mne.io.RawArray, PreprocessRep
         pct_annotated_bad=pct_bad,
         n_artifact_windows=len(artifact_annots),
         n_dropout_windows=n_dropout,
+        n_emg_windows=len(emg_annots),
         per_channel_flagged_windows=per_channel_flags,
+        per_channel_emg_flagged_windows=per_channel_emg_flags,
         globally_bad_channels=globally_bad,
     )
     return raw, report

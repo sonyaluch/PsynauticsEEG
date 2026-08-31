@@ -76,6 +76,26 @@ NOTCH_FREQS_HZ = [60.0]
 # against within that channel).
 GLOBAL_BAD_CHANNEL_MAD_RATIO = 5.0
 
+# ASSUMPTION: a window is flagged BAD_EMG if the ratio of high-frequency
+# (20-40Hz) to low-frequency (1-10Hz) mean power exceeds this threshold.
+# Cortical EEG has a roughly 1/f spectrum (low >> high); EMG has a much
+# flatter, broadband spectrum, so a channel/window with disproportionate
+# high-frequency power relative to low is a signature of muscle artifact
+# bleeding in, not brain signal. EMPIRICAL BASIS (2026-08-30): sampled
+# ~174k channel-windows across 60 recordings -- the ratio distribution has
+# no clean gap (10th pct 0.017, median 0.059, 90th pct 0.163, 99th pct
+# 0.323), consistent with the bad-channel-MAD-ratio threshold (also no
+# clean gap; confirmed by eye instead). What DOES separate clean from
+# suspect recordings is the *rate* of high-ratio windows: a known-clean
+# reference recording has ~0.3% of windows above 0.3, vs 1.8-3.0% in
+# recordings with a visually-confirmed spectral bump (see the CAVEAT above
+# COGNITION_CHANNEL). 0.3 sits at roughly the 99th percentile overall while
+# concentrating on the already-suspect files, rather than flagging a large
+# fraction of the whole cohort the way a lower threshold would.
+EMG_LOW_BAND_HZ = (1.0, 10.0)
+EMG_HIGH_BAND_HZ = (20.0, 40.0)
+EMG_RATIO_THRESH = 0.3
+
 # --- Artifact rejection ------------------------------------------------------
 # Robust (MAD-based) z-score threshold for flagging short windows as
 # artifact, applied per channel on top of dropout annotations. Chosen to be

@@ -139,6 +139,7 @@ def main() -> None:
                 max_gap_s=load_report.max_gap_s,
                 bad_channels=",".join(bad_channels) if bad_channels else None,
                 n_artifact_windows=prep_report.n_artifact_windows,
+                n_emg_windows=prep_report.n_emg_windows,
                 pct_annotated_bad=prep_report.pct_annotated_bad,
                 output_file=out_name,
             )

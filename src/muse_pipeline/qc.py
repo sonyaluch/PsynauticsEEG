@@ -36,15 +36,16 @@ def plot_trace_with_annotations(raw: mne.io.RawArray, out_path: Path, max_second
         ax.set_ylabel(ch, rotation=0, ha="right", va="center")
         ax.set_xlim(times[0], times[-1])
 
+    colors = {"BAD_dropout": "red", "BAD_artifact": "orange", "BAD_EMG": "purple"}
     for onset, duration, desc in zip(raw.annotations.onset, raw.annotations.duration, raw.annotations.description):
         if onset > times[-1]:
             continue
-        color = "red" if desc == "BAD_dropout" else "orange"
+        color = colors.get(desc, "orange")
         for ax in axes:
             ax.axvspan(onset, min(onset + duration, times[-1]), color=color, alpha=0.25)
 
     axes[-1].set_xlabel("Time (s)")
-    fig.suptitle(f"First {max_seconds:.0f}s -- red=dropout, orange=artifact")
+    fig.suptitle(f"First {max_seconds:.0f}s -- red=dropout, orange=artifact, purple=EMG")
     fig.tight_layout()
     fig.savefig(out_path, dpi=130)
     plt.close(fig)
