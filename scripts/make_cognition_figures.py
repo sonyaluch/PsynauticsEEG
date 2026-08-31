@@ -1,11 +1,6 @@
 #!/usr/bin/env python
 """
-Cognition-marker figures from marker_summary.csv, for sharing analysis
-progress (e.g. in a meeting).
-
-Cognition (AF8 beta-band PSD) spans several orders of magnitude across the
-cohort, so every figure here uses a log10 scale -- plotting it linearly
-would make ~90% of recordings indistinguishable near zero.
+Make figures from marker_summary.csv cognition measures.
 
 Usage:
     .venv/bin/python scripts/make_cognition_figures.py \
