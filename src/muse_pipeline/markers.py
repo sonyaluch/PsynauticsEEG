@@ -27,7 +27,7 @@ from . import config
 
 @dataclass
 class MarkerReport:
-    cognition: float | None  # AF8 beta-band power, uV^2, mean across epochs
+    cognition: float | None  # AF8 beta-band mean PSD, uV^2/Hz, mean across epochs
     emotion: float | None  # ln(AF8 alpha power) - ln(AF7 alpha power), mean across epochs
     awareness: float | None  # mean(normalized LZC, normalized PE) across all 4 channels + epochs
     n_epochs_total: int
@@ -47,11 +47,11 @@ def _make_epochs(raw: mne.io.RawArray, reject_by_annotation: bool) -> mne.Epochs
 
 
 def _band_power_uv2(epochs: mne.Epochs, ch_name: str, band: str) -> float:
-    """Mean power (uV^2) in `band` at `ch_name`, averaged across epochs."""
+    """Mean PSD (uV^2/Hz) in `band` at `ch_name`, averaged across epochs (mean across freq bins within the band, NOT integrated/summed -- this is spectral density, not total band power)."""
     fmin, fmax = config.FREQ_BANDS_HZ[band]
     spectrum = epochs.compute_psd(picks=[ch_name], fmin=fmin, fmax=fmax, verbose=False)
     psd = spectrum.get_data()  # (n_epochs, 1, n_freqs), V^2/Hz
-    band_power_per_epoch = psd.mean(axis=-1)[:, 0] * 1e12  # V^2 -> uV^2
+    band_power_per_epoch = psd.mean(axis=-1)[:, 0] * 1e12  # V^2/Hz -> uV^2/Hz
     return float(np.mean(band_power_per_epoch))
 
 

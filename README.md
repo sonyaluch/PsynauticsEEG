@@ -50,7 +50,7 @@ Marker extraction (`src/muse_pipeline/markers.py`) then epochs the cleaned
 signal into fixed 4s windows (dropping any epoch overlapping a `BAD_*`
 annotation) and computes, per recording:
 
-- **Cognition**: mean beta-band (13-30Hz) power at AF8.
+- **Cognition**: mean beta-band (13-30Hz) power spectral density at AF8 (µV²/Hz, not integrated band power).
 - **Emotion**: `ln(AF8 alpha power) - ln(AF7 alpha power)` (frontal alpha
   asymmetry).
 - **Awareness**: mean of normalized Lempel-Ziv complexity and normalized

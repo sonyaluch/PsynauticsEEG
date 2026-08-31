@@ -104,7 +104,8 @@ FREQ_BANDS_HZ = {
     "gamma": (30.0, 40.0),
 }
 
-# ASSUMPTION: beta-band (13-30Hz) power at AF8 as the "Cognition" scalar --
+# ASSUMPTION: beta-band (13-30Hz) mean PSD (uV^2/Hz, not integrated band
+# power) at AF8 as the "Cognition" scalar --
 # beta is the standard EEG correlate of active cognitive engagement /
 # concentration in consumer-EEG literature (cf. Muse's own attention
 # scoring, Pope et al. 1995 engagement index components). Frontal theta is
