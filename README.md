@@ -166,8 +166,13 @@ the data rather than confirmed against Muse/Psynautics documentation:
   more than 5x its sibling channels' -- chosen empirically and confirmed by
   eye against annotated-trace plots across the threshold range, not against
   a physiological calibration.
-- The marker formulas themselves (Cognition = AF8 beta power, Emotion =
+- The marker formulas themselves (Cognition = AF8 beta PSD, Emotion =
   frontal alpha asymmetry, Awareness = LZC + permutation entropy) are
   standard EEG-literature choices, not confirmed Psynautics protocol specs
   -- see the `ASSUMPTION` comments in `config.py` for the reasoning and
   citations behind each.
+- Cognition (beta-band PSD at AF8, a frontal dry-electrode site) is likely
+  a mix of cortical beta and frontalis-muscle EMG artifact -- confirmed not
+  to be a resampling/interpolation bug (see the CAVEAT comment above
+  `COGNITION_CHANNEL` in `config.py`), but not currently distinguished from
+  genuine brain signal by any check in this pipeline.

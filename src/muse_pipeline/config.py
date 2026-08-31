@@ -104,6 +104,19 @@ FREQ_BANDS_HZ = {
     "gamma": (30.0, 40.0),
 }
 
+# CAVEAT: beta-band power at frontal/dry-electrode sites (AF8 here) is a
+# well-documented target for frontalis-muscle EMG contamination, which is
+# NOT distinguished from cortical beta by this pipeline -- the per-window
+# and global-bad-channel checks catch amplitude outliers, not EMG's
+# broadband spectral signature. Investigated 2026-08-30: a spectral bump in
+# the ~15-20Hz range appears in several "clean" (non-excluded) recordings.
+# Ruled out as a resampling/interpolation artifact (synthetic white noise
+# resampled through the same recording's real irregular timestamps shows no
+# comparable bump), and its frequency is inconsistent across recordings
+# (not a fixed hardware/electronic artifact) -- both point toward genuine
+# EMG rather than a pipeline bug. Treat Cognition as a mix of cortical beta
+# and muscle artifact until a dedicated EMG check is added.
+#
 # ASSUMPTION: beta-band (13-30Hz) mean PSD (uV^2/Hz, not integrated band
 # power) at AF8 as the "Cognition" scalar --
 # beta is the standard EEG correlate of active cognitive engagement /
