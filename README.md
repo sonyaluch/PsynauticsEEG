@@ -98,6 +98,18 @@ Single file:
 Saves a cleaned `.fif`, before/after PSD plot, annotated-trace plot, and a
 JSON QC report.
 
+**Whenever new readings land** (new participants, or existing participants'
+later sessions), the whole pipeline can be re-run in one command:
+
+```bash
+./scripts/run_full_pipeline.sh              # pulls new/changed files from GCS first
+./scripts/run_full_pipeline.sh --skip-sync  # skip the GCS pull, use data/raw/ as-is
+```
+
+Always rebuilds from the full current cohort in `data/raw/`, not just the
+new files, so results stay consistent. The steps it runs -- individually,
+if you want more control:
+
 Batch, across a directory of raw exports, cross-referenced against the
 export manifest for participant/module metadata:
 
