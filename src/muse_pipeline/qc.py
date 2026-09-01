@@ -1,6 +1,7 @@
 """QC plots for a preprocessing run: before/after PSD, raw trace with annotations."""
 from __future__ import annotations
 
+import warnings
 from pathlib import Path
 
 import matplotlib
@@ -15,11 +16,17 @@ from . import config
 
 def plot_psd_before_after(raw_before: mne.io.RawArray, raw_after: mne.io.RawArray, out_path: Path) -> None:
     fig, axes = plt.subplots(1, 2, figsize=(12, 4.5), sharey=True)
-    raw_before.compute_psd(fmax=60, verbose=False).plot(axes=axes[0], show=False, amplitude=False)
-    axes[0].set_title("Before filtering")
-    raw_after.compute_psd(fmax=60, verbose=False).plot(axes=axes[1], show=False, amplitude=False)
-    axes[1].set_title(f"After filtering ({config.BANDPASS_LOW_HZ}-{config.BANDPASS_HIGH_HZ} Hz + notch)")
-    fig.tight_layout()
+    # MNE's PSD plot computes Welch's method per contiguous good-data segment
+    # (splitting on BAD_* annotations), so short segments trigger a harmless
+    # "nperseg > input length" warning per segment -- MNE auto-shrinks its
+    # window to fit, this is cosmetic noise, not a real problem.
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", UserWarning)
+        raw_before.compute_psd(fmax=60, verbose=False).plot(axes=axes[0], show=False, amplitude=False)
+        axes[0].set_title("Before filtering")
+        raw_after.compute_psd(fmax=60, verbose=False).plot(axes=axes[1], show=False, amplitude=False)
+        axes[1].set_title(f"After filtering ({config.BANDPASS_LOW_HZ}-{config.BANDPASS_HIGH_HZ} Hz + notch)")
+        fig.tight_layout()
     fig.savefig(out_path, dpi=130)
     plt.close(fig)
 
