@@ -2,15 +2,9 @@
 """
 Paired baseline-vs-treatment statistical test for the Cognition marker.
 
-Compares, within each subject, their mean baseline Cognition (across all
-available PSYNAUTICS_BASELINE_EEG_* sessions, including the Tx-day baseline)
-against their single Treatment-day Cognition value. Paired because it's the
-same subjects measured twice, not independent samples.
+Compares, within each subject, their mean baseline Cognition against their single Treatment-day Cognition value.
 
-Cognition spans several orders of magnitude across the cohort (see
-cognition_distribution.png), so all testing/plotting here works in log10
-space -- comparing raw values would let a couple of extreme sessions
-dominate a parametric test.
+All testing and plotting works in log10.
 
 Usage:
     .venv/bin/python scripts/stats_baseline_vs_treatment.py \

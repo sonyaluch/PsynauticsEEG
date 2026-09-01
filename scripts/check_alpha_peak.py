@@ -1,20 +1,10 @@
 #!/usr/bin/env python
 """
-Sanity-check the pipeline's spectral estimation against a well-known,
-within-recording EEG phenomenon: a resting-state alpha (8-13Hz) peak, rather
-than relying on cross-study absolute-power comparison (which is known to be
-unreliable across different devices/references/impedances -- see the
-Cognition literature-comparison discussion).
+Check spectral estimation against resting-state alpha (8-13Hz) peak.
 
-For each channel, fits a 1/f background (linear in log-power vs log-freq,
-excluding an 8-13Hz guard band) using MNE's Welch PSD computed the same way
-markers.py does (epoched, BAD_*-annotation-aware). A "peak" is flagged if
-the observed alpha-band power exceeds the fitted background by a given
-ratio at that frequency.
-
-Restricted to "clean" recordings (no globally-bad channel, <20%
-annotated-bad) so a contaminated channel's broadband noise can't mask or
-fake a peak.
+For each channel, fits a 1/f background (linear in log-power vs log-freq, excluding an 8-13Hz guard band)
+using MNE's Welch PSD computed the same way markers.py does (epoched, BAD_*-annotation-aware).
+Peak flagged if the observed alpha-band power exceeds the fitted background by a given ratio at that frequency.
 
 Usage:
     .venv/bin/python scripts/check_alpha_peak.py \

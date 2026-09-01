@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
-# Run the full pipeline end-to-end: pull new raw data, preprocess, extract
-# markers, regenerate all figures/stats. Safe to re-run any time new
-# readings land -- always rebuilds from the full current cohort in
-# data/raw/, not just new files, so results stay consistent.
+# Run the full pipeline end-to-end (pull new raw data, preprocess, extract markers, regenerate all figures/stats)
+# Safe to re-run with new readings. Rebuilds full cohort in data/raw/
 #
 # Usage:
 #   ./scripts/run_full_pipeline.sh              # sync from GCS, then run everything

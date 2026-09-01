@@ -1,8 +1,7 @@
 #!/usr/bin/env python
 """
-Batch-extract Cognition/Emotion/Awareness markers from preprocessed Muse
-`_clean_raw.fif` files (produced by batch_preprocess.py), writing one row
-per recording to a summary CSV.
+Batch-extract Cognition/Emotion/Awareness markers from preprocessed Muse `_clean_raw.fif` files (produced by batch_preprocess.py).
+Write one row per recording to a summary CSV.
 
 Usage:
     .venv/bin/python scripts/extract_markers.py \
