@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from muse_pipeline import qc  # noqa: E402
 from muse_pipeline.io import load_muse_csv  # noqa: E402
+from muse_pipeline.markers import extract_markers  # noqa: E402
 from muse_pipeline.preprocess import preprocess_raw  # noqa: E402
 
 
@@ -51,6 +52,16 @@ def main() -> None:
     raw_clean.save(fif_path, overwrite=True, verbose=False)
     print(f"Saved cleaned Raw -> {fif_path}")
 
+    print("Extracting markers ...")
+    markers = extract_markers(raw_clean)
+    print(
+        f"  Cognition: {markers.cognition}\n"
+        f"  Emotion:   {markers.emotion}\n"
+        f"  Awareness: {markers.awareness}\n"
+        f"  ({markers.n_epochs_used}/{markers.n_epochs_total} epochs used"
+        f"{', bad channels: ' + ','.join(markers.bad_channels) if markers.bad_channels else ''})"
+    )
+
     psd_path = args.outdir / f"{stem}_psd_before_after.png"
     qc.plot_psd_before_after(raw_before, raw_clean, psd_path)
     trace_path = args.outdir / f"{stem}_trace_annotated.png"
@@ -74,7 +85,18 @@ def main() -> None:
                     "pct_annotated_bad": prep_report.pct_annotated_bad,
                     "n_artifact_windows": prep_report.n_artifact_windows,
                     "n_dropout_windows": prep_report.n_dropout_windows,
+                    "n_emg_windows": prep_report.n_emg_windows,
                     "per_channel_flagged_windows": prep_report.per_channel_flagged_windows,
+                    "per_channel_emg_flagged_windows": prep_report.per_channel_emg_flagged_windows,
+                    "globally_bad_channels": prep_report.globally_bad_channels,
+                },
+                "markers": {
+                    "cognition": markers.cognition,
+                    "emotion": markers.emotion,
+                    "awareness": markers.awareness,
+                    "n_epochs_total": markers.n_epochs_total,
+                    "n_epochs_used": markers.n_epochs_used,
+                    "bad_channels": markers.bad_channels,
                 },
             },
             indent=2,
