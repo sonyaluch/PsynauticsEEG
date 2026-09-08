@@ -57,7 +57,7 @@ def main() -> None:
     print(
         f"  Cognition: {markers.cognition}\n"
         f"  Emotion:   {markers.emotion}\n"
-        f"  Awareness: {markers.awareness}\n"
+        f"  Awareness: {markers.awareness}  (LZC: {markers.awareness_lzc})\n"
         f"  ({markers.n_epochs_used}/{markers.n_epochs_total} epochs used"
         f"{', bad channels: ' + ','.join(markers.bad_channels) if markers.bad_channels else ''})"
     )
@@ -94,6 +94,7 @@ def main() -> None:
                     "cognition": markers.cognition,
                     "emotion": markers.emotion,
                     "awareness": markers.awareness,
+                    "awareness_lzc": markers.awareness_lzc,
                     "n_epochs_total": markers.n_epochs_total,
                     "n_epochs_used": markers.n_epochs_used,
                     "bad_channels": markers.bad_channels,

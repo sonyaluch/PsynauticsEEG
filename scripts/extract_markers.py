@@ -60,6 +60,7 @@ def main() -> None:
                 cognition=report.cognition,
                 emotion=report.emotion,
                 awareness=report.awareness,
+                awareness_lzc=report.awareness_lzc,
                 n_epochs_total=report.n_epochs_total,
                 n_epochs_used=report.n_epochs_used,
                 bad_channels=",".join(report.bad_channels) if report.bad_channels else None,
@@ -80,7 +81,7 @@ def main() -> None:
     print(f"\nDone: {n_ok} succeeded, {n_fail} failed. Marker summary -> {summary_path}")
     if n_ok:
         ok = summary.loc[summary["error"].isna()]
-        for marker in ["cognition", "emotion", "awareness"]:
+        for marker in ["cognition", "emotion", "awareness", "awareness_lzc"]:
             n_avail = int(ok[marker].notna().sum())
             print(f"  {marker}: available for {n_avail}/{n_ok} recordings")
 
