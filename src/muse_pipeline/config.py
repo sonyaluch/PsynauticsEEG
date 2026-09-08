@@ -109,10 +109,11 @@ ARTIFACT_WINDOW_S = 1.0
 ARTIFACT_MAD_ZSCORE_THRESH = 5.0
 
 # --- Marker extraction -------------------------------------------------------
-# ASSUMPTION: none of these formulas/parameters are confirmed against a
-# Psynautics protocol spec -- they're standard choices from the EEG
-# literature, chosen so the markers are well-defined and reproducible while
-# a real spec is tracked down. Revisit each if a documented spec turns up.
+# All three marker definitions (Cognition/Performance, Emotion/Mood,
+# Awareness) are now CONFIRMED per an update from the study -- see each
+# marker's own comment below for the specific definition and correction
+# history. Epoching parameters (below) remain a pipeline design choice, not
+# part of the confirmed spec.
 
 # Fixed-length, non-overlapping epochs for windowed spectral/entropy
 # estimation. 4s is a common resting-state EEG epoch length -- long enough
@@ -128,6 +129,7 @@ FREQ_BANDS_HZ = {
     "beta": (13.0, 30.0),
     "gamma": (30.0, 44.0),
     "broadband": (1.0, 44.0),  # delta through gamma
+    "mood_alpha": (7.5, 13.0),  # Emotion/Mood's alpha band -- confirmed distinct from the general "alpha" above
 }
 
 # CAVEAT: broadband power at frontal/dry-electrode sites (AF8 here) is a
@@ -155,23 +157,18 @@ FREQ_BANDS_HZ = {
 COGNITION_CHANNEL = "AF8"
 COGNITION_BAND = "broadband"
 
-# ASSUMPTION: frontal alpha asymmetry (Davidson's approach-withdrawal
-# paradigm), computed as ln(right alpha power) - ln(left alpha power) =
-# ln(AF8) - ln(AF7). Alpha is an "idling" rhythm (less alpha = more cortical
-# activity), so a positive value means relatively greater LEFT frontal
-# activation, associated with approach-oriented / positive affect in this
-# paradigm; negative = withdrawal / negative affect.
-EMOTION_LEFT_CHANNEL = "AF7"
-EMOTION_RIGHT_CHANNEL = "AF8"
-EMOTION_BAND = "alpha"
+# CONFIRMED (per an update from the study): Emotion/"Mood" is single-channel
+# AF7 alpha-band (7.5-13Hz) mean PSD (uV^2/Hz) -- corrected from the earlier
+# ASSUMPTION-tagged AF7-vs-AF8 asymmetry formula (ln(AF8) - ln(AF7)), which
+# is no longer used.
+EMOTION_CHANNEL = "AF7"
+EMOTION_BAND = "mood_alpha"
 
-# ASSUMPTION: "Awareness" = mean of normalized Lempel-Ziv complexity (LZC)
-# and normalized permutation entropy (PE), averaged across all 4 channels
-# and all epochs. Both are standard complexity/entropy measures used as EEG
-# consciousness/awareness proxies in the anesthesia-depth and meditation
-# literature. LZC needs a binary sequence -- each epoch is binarized via a
-# per-epoch median split (x >= median(x)), the standard approach for
-# continuous-valued signals per antropy's own documentation.
+# CONFIRMED (per an update from the study): Awareness is normalized
+# permutation entropy (PE) alone, averaged across all 4 channels and all
+# epochs -- corrected from the earlier ASSUMPTION-tagged formula, which
+# averaged PE with normalized Lempel-Ziv complexity (LZC). LZC is no longer
+# computed.
 PERM_ENTROPY_ORDER = 3
 PERM_ENTROPY_DELAY = 1
 

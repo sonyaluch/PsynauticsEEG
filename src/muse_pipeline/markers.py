@@ -1,19 +1,19 @@
 """
-Marker extraction from preprocessed Muse Raw objects: Cognition (AF8
-broadband power, 1-44Hz), Emotion (AF7/AF8 alpha asymmetry), Awareness
-(Lempel-Ziv complexity + permutation entropy across all 4 channels).
+Marker extraction from preprocessed Muse Raw objects: Cognition/Performance
+(AF8 broadband power, 1-44Hz), Emotion/Mood (AF7 alpha-band power,
+7.5-13Hz), Awareness (permutation entropy across all 4 channels).
 
-Cognition's band is a CONFIRMED definition (per an update from the study);
-Emotion and Awareness are still ASSUMPTIONs based on established EEG
-literature, not confirmed Psynautics protocol specs -- see config.py for
-band definitions, formulas, and citations.
+All three definitions are CONFIRMED per an update from the study -- see
+config.py for band definitions and correction history (each was previously
+an ASSUMPTION-tagged literature-standard guess; Cognition's guess turned
+out correct, Emotion's and Awareness's did not).
 
 Computed per fixed-length epoch (any epoch overlapping a BAD_* annotation is
 dropped via MNE's reject_by_annotation), then averaged across epochs into
 one scalar per recording. A marker whose required channel(s) are in
 raw.info["bads"] is reported as unavailable (None) rather than silently
-computed on incomplete data -- Emotion needs both AF7 and AF8, Awareness
-needs all 4 channels, Cognition needs only AF8.
+computed on incomplete data -- Cognition needs AF8, Emotion needs AF7,
+Awareness needs all 4 channels.
 """
 from __future__ import annotations
 
@@ -29,8 +29,8 @@ from . import config
 @dataclass
 class MarkerReport:
     cognition: float | None  # AF8 broadband (1-44Hz) mean PSD, uV^2/Hz, mean across epochs
-    emotion: float | None  # ln(AF8 alpha power) - ln(AF7 alpha power), mean across epochs
-    awareness: float | None  # mean(normalized LZC, normalized PE) across all 4 channels + epochs
+    emotion: float | None  # AF7 mood-alpha (7.5-13Hz) mean PSD, uV^2/Hz, mean across epochs
+    awareness: float | None  # mean normalized permutation entropy across all 4 channels + epochs
     n_epochs_total: int
     n_epochs_used: int  # after dropping epochs overlapping BAD_* annotations
     bad_channels: list[str] = field(default_factory=list)
@@ -56,21 +56,13 @@ def _band_power_uv2(epochs: mne.Epochs, ch_name: str, band: str) -> float:
     return float(np.mean(band_power_per_epoch))
 
 
-def _lzc_normalized(x: np.ndarray) -> float:
-    binary = (x >= np.median(x)).astype(int)
-    return float(ant.lziv_complexity(binary, normalize=True))
-
-
 def _awareness_channel_score(epochs: mne.Epochs, ch_name: str) -> float:
-    """Mean of (normalized LZC, normalized permutation entropy), across epochs, for one channel."""
+    """Mean normalized permutation entropy across epochs, for one channel."""
     data = epochs.get_data(picks=[ch_name])[:, 0, :]  # (n_epochs, n_times)
-    scores = []
-    for epoch in data:
-        lzc = _lzc_normalized(epoch)
-        pe = ant.perm_entropy(
-            epoch, order=config.PERM_ENTROPY_ORDER, delay=config.PERM_ENTROPY_DELAY, normalize=True
-        )
-        scores.append((lzc + pe) / 2.0)
+    scores = [
+        ant.perm_entropy(epoch, order=config.PERM_ENTROPY_ORDER, delay=config.PERM_ENTROPY_DELAY, normalize=True)
+        for epoch in data
+    ]
     return float(np.mean(scores))
 
 
@@ -86,14 +78,8 @@ def extract_markers(raw: mne.io.RawArray) -> MarkerReport:
         cognition = _band_power_uv2(epochs, config.COGNITION_CHANNEL, config.COGNITION_BAND)
 
     emotion = None
-    if (
-        n_used > 0
-        and config.EMOTION_LEFT_CHANNEL not in bad_channels
-        and config.EMOTION_RIGHT_CHANNEL not in bad_channels
-    ):
-        left = _band_power_uv2(epochs, config.EMOTION_LEFT_CHANNEL, config.EMOTION_BAND)
-        right = _band_power_uv2(epochs, config.EMOTION_RIGHT_CHANNEL, config.EMOTION_BAND)
-        emotion = float(np.log(right) - np.log(left))
+    if n_used > 0 and config.EMOTION_CHANNEL not in bad_channels:
+        emotion = _band_power_uv2(epochs, config.EMOTION_CHANNEL, config.EMOTION_BAND)
 
     awareness = None
     if n_used > 0 and not bad_channels:
