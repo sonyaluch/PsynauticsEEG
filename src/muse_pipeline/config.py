@@ -59,7 +59,12 @@ MAX_JITTER_S = 0.2
 
 # --- Filtering ---------------------------------------------------------------
 BANDPASS_LOW_HZ = 1.0
-BANDPASS_HIGH_HZ = 40.0
+# 45Hz, not 40Hz: Cognition (below) is defined as broadband power up to
+# 44Hz, so the passband needs to clear 44Hz with a little margin -- a
+# filter's transition band isn't a brick wall, content right at the nominal
+# edge is partially attenuated. 45Hz still sits comfortably below the 60Hz
+# mains-hum frequency, so the notch-filter no-op logic below is unaffected.
+BANDPASS_HIGH_HZ = 45.0
 # US recruitment per the protocol (mains hum at 60 Hz). Only applied if it
 # falls below the bandpass upper edge / Nyquist, otherwise it's a no-op
 # handled defensively in preprocess.py.
@@ -121,31 +126,34 @@ FREQ_BANDS_HZ = {
     "theta": (4.0, 8.0),
     "alpha": (8.0, 13.0),
     "beta": (13.0, 30.0),
-    "gamma": (30.0, 40.0),
+    "gamma": (30.0, 44.0),
+    "broadband": (1.0, 44.0),  # delta through gamma
 }
 
-# CAVEAT: beta-band power at frontal/dry-electrode sites (AF8 here) is a
+# CAVEAT: broadband power at frontal/dry-electrode sites (AF8 here) is a
 # well-documented target for frontalis-muscle EMG contamination, which is
-# NOT distinguished from cortical beta by this pipeline -- the per-window
-# and global-bad-channel checks catch amplitude outliers, not EMG's
-# broadband spectral signature. Investigated 2026-08-30: a spectral bump in
-# the ~15-20Hz range appears in several "clean" (non-excluded) recordings.
-# Ruled out as a resampling/interpolation artifact (synthetic white noise
-# resampled through the same recording's real irregular timestamps shows no
+# NOT distinguished from cortical activity by this pipeline -- the
+# per-window and global-bad-channel checks catch amplitude outliers, not
+# EMG's broadband spectral signature. Investigated 2026-08-30 (when
+# Cognition was still beta-band only): a spectral bump in the ~15-20Hz
+# range appears in several "clean" (non-excluded) recordings. Ruled out as
+# a resampling/interpolation artifact (synthetic white noise resampled
+# through the same recording's real irregular timestamps shows no
 # comparable bump), and its frequency is inconsistent across recordings
 # (not a fixed hardware/electronic artifact) -- both point toward genuine
-# EMG rather than a pipeline bug. Treat Cognition as a mix of cortical beta
-# and muscle artifact until a dedicated EMG check is added.
+# EMG rather than a pipeline bug. Broadband power is, if anything, MORE
+# exposed to this than the original beta-only definition was, since it now
+# spans the same contaminated range plus everything else. Treat Cognition
+# as a mix of cortical activity and muscle artifact until a dedicated EMG
+# check goes beyond the current coarse per-window BAD_EMG flag.
 #
-# ASSUMPTION: beta-band (13-30Hz) mean PSD (uV^2/Hz, not integrated band
-# power) at AF8 as the "Cognition" scalar --
-# beta is the standard EEG correlate of active cognitive engagement /
-# concentration in consumer-EEG literature (cf. Muse's own attention
-# scoring, Pope et al. 1995 engagement index components). Frontal theta is
-# the other common candidate (cognitive-load paradigms); swap COGNITION_BAND
-# if the protocol turns out to mean that instead.
+# CONFIRMED (per an update from the study): Cognition is AF8 broadband
+# power (delta through gamma, 1-44Hz), not beta-band only -- corrected from
+# the earlier ASSUMPTION-tagged beta-band-only definition. Mean PSD
+# (uV^2/Hz), not integrated band power -- see _band_power_uv2() in
+# markers.py.
 COGNITION_CHANNEL = "AF8"
-COGNITION_BAND = "beta"
+COGNITION_BAND = "broadband"
 
 # ASSUMPTION: frontal alpha asymmetry (Davidson's approach-withdrawal
 # paradigm), computed as ln(right alpha power) - ln(left alpha power) =

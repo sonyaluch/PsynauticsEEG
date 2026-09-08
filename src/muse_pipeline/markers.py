@@ -1,11 +1,12 @@
 """
-Marker extraction from preprocessed Muse Raw objects: Cognition (AF8 band
-power), Emotion (AF7/AF8 alpha asymmetry), Awareness (Lempel-Ziv complexity +
-permutation entropy across all 4 channels).
+Marker extraction from preprocessed Muse Raw objects: Cognition (AF8
+broadband power, 1-44Hz), Emotion (AF7/AF8 alpha asymmetry), Awareness
+(Lempel-Ziv complexity + permutation entropy across all 4 channels).
 
-All three formulas are ASSUMPTIONs based on established EEG literature, not
-confirmed Psynautics protocol specs -- see config.py for band definitions,
-formulas, and citations.
+Cognition's band is a CONFIRMED definition (per an update from the study);
+Emotion and Awareness are still ASSUMPTIONs based on established EEG
+literature, not confirmed Psynautics protocol specs -- see config.py for
+band definitions, formulas, and citations.
 
 Computed per fixed-length epoch (any epoch overlapping a BAD_* annotation is
 dropped via MNE's reject_by_annotation), then averaged across epochs into
@@ -27,7 +28,7 @@ from . import config
 
 @dataclass
 class MarkerReport:
-    cognition: float | None  # AF8 beta-band mean PSD, uV^2/Hz, mean across epochs
+    cognition: float | None  # AF8 broadband (1-44Hz) mean PSD, uV^2/Hz, mean across epochs
     emotion: float | None  # ln(AF8 alpha power) - ln(AF7 alpha power), mean across epochs
     awareness: float | None  # mean(normalized LZC, normalized PE) across all 4 channels + epochs
     n_epochs_total: int

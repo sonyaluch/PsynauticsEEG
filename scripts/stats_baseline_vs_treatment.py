@@ -66,7 +66,7 @@ def fig_paired(pairs: pd.DataFrame, out_path: Path) -> None:
     ax.set_xticks([0, 1])
     ax.set_xticklabels(["Baseline\n(subject mean)", "Treatment"])
     ax.set_xlim(-0.3, 1.3)
-    ax.set_ylabel(r"Cognition (AF8 beta-band PSD, $\mu V^2/Hz$)")
+    ax.set_ylabel(r"Cognition (AF8 broadband PSD, $\mu V^2/Hz$)")
     ax.set_title(f"Baseline vs. Treatment, paired by subject  (n={len(pairs)})")
     fig.tight_layout()
     fig.savefig(out_path, dpi=150)

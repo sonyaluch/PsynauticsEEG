@@ -7,7 +7,7 @@ EEG analysis for the Psynautics at-home study.
 - 4 channels (TP9, AF7, AF8, TP10).
 
 Three derived markers are extracted per recording in the analysis,
-**Cognition** (AF8 beta-band power),
+**Cognition** (AF8 broadband power, 1-44Hz),
 **Emotion** (AF7/AF8 alpha asymmetry), and
 **Awareness** (mean of normalized Lempel-Ziv complexity and permutation entropy, across all 4 channels).
 
@@ -26,7 +26,7 @@ The loader (`src/muse_pipeline/io.py`):
 
 The preprocessor (`src/muse_pipeline/preprocess.py`) then:
 
-1. Band-pass filters (1-40 Hz) and notch-filters (60 Hz mains).
+1. Band-pass filters (1-45 Hz) and notch-filters (60 Hz mains).
 2. Flags short artifact windows per-channel using a robust MAD-based z-score computed over the whole recording (instead of doing it per-window, which
    would allow a sustained artifact to hide by normalizing against itself).
 
@@ -38,7 +38,7 @@ Any channel that is uniformly bad for the *whole* recording (e.g. persistently p
 
 Marker extraction (`src/muse_pipeline/markers.py`) then epochs the cleaned signal into fixed 4s windows (excluding any epoch overlapping a `BAD_*` annotation) and computes, per recording:
 
-- **Cognition**: mean beta-band (13-30Hz) power spectral density at AF8 (µV²/Hz, not integrated band power).
+- **Cognition**: mean broadband (delta through gamma, 1-44Hz) power spectral density at AF8 (µV²/Hz, not integrated band power). Corrected from an earlier beta-band-only (13-30Hz) definition per an update from the study.
 - **Emotion**: `ln(AF8 alpha power) - ln(AF7 alpha power)` (frontal alpha
   asymmetry).
 - **Awareness**: mean of normalized Lempel-Ziv complexity and normalized
@@ -142,6 +142,7 @@ The export manifest (`eeg_summary.csv`) and `participant_key_CONFIDENTIAL.csv`
 - `ch5`/`ch6` are unused aux columns, optional, and ignored when empty; a file where they contain real data doesn't match the expected 4-channel
   EEG-only export and is excluded.
 - A channel is "globally bad" for a whole recording if its overall MAD is more than 5x its sibling channels'
-- The marker formulas themselves (Cognition = AF8 beta PSD, Emotion = frontal alpha asymmetry, Awareness = LZC + permutation entropy) are
-  standard EEG-literature choices, not confirmed Psynautics protocol specs
-- Cognition (beta-band PSD at AF8, a frontal dry-electrode site) is likely a mix of cortical beta and frontalis-muscle EMG artifact
+- Emotion (frontal alpha asymmetry) and Awareness (LZC + permutation entropy) are standard EEG-literature choices, not confirmed Psynautics
+  protocol specs. Cognition's band (AF8 broadband, 1-44Hz) IS confirmed, per an update from the study -- it was originally implemented as
+  beta-band-only (13-30Hz), which required widening the pipeline's bandpass filter from 40Hz to 45Hz when corrected.
+- Cognition (broadband PSD at AF8, a frontal dry-electrode site) is likely a mix of cortical activity and frontalis-muscle EMG artifact
