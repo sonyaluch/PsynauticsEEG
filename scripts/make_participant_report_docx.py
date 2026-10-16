@@ -5,8 +5,8 @@ layout as make_participant_report_html.py (banner, session-info bar, grey
 section bars, text-left / chart-right rows). Shares all data and charts with
 the HTML version, so the two never disagree.
 
-Scores are PERCENTILE RANKS against every other participant's recordings
-(50 = typical) -- a context scale, not a quality judgement.
+Each marker is shown in its own units and compared ONLY with this
+participant's own baseline sessions -- nothing is ranked against others.
 
 Usage:
     .venv/bin/python scripts/make_participant_report_docx.py --subject Sub_53 \
@@ -165,15 +165,16 @@ def bullet(doc, text, size=9):
     run(p, text, size=size)
 
 
-def pct_parts(info):
+def cmp_parts(info):
     parts = []
-    for col, *_ in MAIN:
-        pre, post = info[(col, "Pre")], info[(col, "Post")]
+    for col, _n, log, _c, _u in MAIN:
+        b_, p_ = info[(col, "Baseline")], info[(col, "Post")]
         parts += [("br", ""), ("b", f"{SHORT[col]}: ")]
-        if pre[0] is None or post[0] is None:
-            parts.append(("t", f"cannot compare (usable sessions: {pre[1]} pre, {post[1]} post)."))
+        if b_[0] is None or p_[0] is None:
+            parts.append(("t", f"cannot compare (usable sessions: {b_[1]} baseline, {p_[1]} post)."))
         else:
-            parts.append(("t", f"pre {pre[0]:.0f}th percentile (n={pre[1]}), post {post[0]:.0f}th (n={post[1]})."))
+            chg = f"x{p_[0] / b_[0]:.2f}" if log else f"{p_[0] - b_[0]:+.3f}"
+            parts.append(("t", f"baseline {fmt(b_[0], log)} (n={b_[1]}), post {fmt(p_[0], log)} (n={p_[1]}), change {chg}."))
     return parts
 
 
@@ -189,7 +190,7 @@ def main() -> None:
     ap.add_argument("--outdir", type=Path, default=Path("output/participant_reports"))
     a = ap.parse_args()
     c = collect(a)
-    label, me, others, info = c["label"], c["me"], c["others"], c["info"]
+    label, me, info = c["label"], c["me"], c["info"]
 
     doc = Document()
     sec = doc.sections[0]
@@ -217,9 +218,10 @@ def main() -> None:
 
     shaded_par(doc, "FFF7E6", [
         ("Read this first. ", {"bold": True, "size": 9}),
-        ("This is one person's data. Scores are percentile ranks against all other participants' recordings "
-         "(50 = typical); they are not a measure of how good or bad anything is, and no statistical tests are "
-         "possible with n=1. Data quality for this participant is limited; see the Data quality section.", {"size": 9})],
+        ("This is one person's data. Each marker is shown in its own units and compared only with this "
+         "participant's own baseline sessions. Nothing here is ranked or compared against other people, none of it says what is "
+         "good or bad, and no statistical tests are possible with n=1. Data quality for this participant is limited; see the "
+         "Data quality section.", {"size": 9})],
         before=5, after=5)
     spacer(doc, 6)
 
@@ -227,13 +229,15 @@ def main() -> None:
     chart_row(doc, "Longitudinal metrics", [
         ("b", "Key EEG findings: "),
         ("t", "Performance (AF8 broadband), Mood (AF7 alpha) and Awareness (permutation entropy, all 4 channels) across the "
-              "protocol, as percentiles of the rest of the cohort. Faint dots are individual recordings; lines join each step's "
-              "average. Dates above the chart are each step's first recording. Gaps mean the marker could not be computed "
-              "(a required electrode was flagged bad)."),
+              "protocol, each in its own units (Performance and Mood on a log axis). Dots are individual recordings and the line joins "
+              "each step's average. The shaded band is this participant's own baseline range and the dotted line their baseline mean; "
+              "the grey column marks the treatment-day session. Dates above the chart are each step's first recording. Gaps mean the "
+              "marker could not be computed (a required electrode was flagged bad)."),
     ], c["long_png"])
     chart_row(doc, "Pre / post comparison", [
-        ("t", "Pre = baseline sessions (days 1-5 and the day-6 pre-treatment recording); post = the four post-treatment sessions.")
-    ] + pct_parts(info), c["pp_png"])
+        ("t", "Pre = baseline sessions (days 1-5 and the day-6 pre-treatment recording); post = the four post-treatment sessions. Black dots are individual sessions; the thick line is the average "
+              "(geometric for Performance and Mood).")
+    ] + cmp_parts(info), c["pp_png"])
     chart_row(doc, "Treatment metrics", [
         ("t", "Each marker over the treatment-day recording, per clean 4-second window, in raw units (Performance and Mood in "
               "uV^2/Hz on a log axis; Awareness 0-1). Windows with dropout, artifact or muscle contamination are removed, so the "
@@ -255,8 +259,7 @@ def main() -> None:
 
     section_bar(doc, "Data quality")
     bullet(doc, f"Channels flagged bad (recordings affected): {c['ch_txt']}.")
-    bullet(doc, f"Median share of each recording lost to dropout, artifact or muscle activity: {me['pct_annotated_bad'].median():.0f}% "
-                f"(rest of cohort: {others['pct_annotated_bad'].median():.0f}%).")
+    bullet(doc, f"Median share of each recording lost to dropout, artifact or muscle activity: {me['pct_annotated_bad'].median():.0f}%.")
     bullet(doc, f"Usable recordings: Performance {int(me['cognition'].notna().sum())}, Mood {int(me['emotion'].notna().sum())}, "
                 f"Awareness {int(me['awareness'].notna().sum())} of {len(me)}. Awareness needs all four electrodes clean at once.")
     if c["irregular"]:
@@ -277,7 +280,6 @@ def main() -> None:
         "Performance and Mood come from frontal dry electrodes and are partly contaminated by facial/jaw muscle activity that the "
         "pipeline only partly removes; a change may reflect muscle tension rather than brain activity.",
         "Awareness (permutation entropy) is very stable within a person and moves little, so small changes are hard to interpret.",
-        "When ear electrodes (TP9/TP10) are often bad, comparisons with the cohort are against cleaner data than this person's.",
         "Questionnaire-based sections (personality, emotionality) are not included in this version.",
     ]:
         bullet(doc, t)

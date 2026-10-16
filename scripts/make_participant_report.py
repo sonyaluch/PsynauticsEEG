@@ -4,7 +4,7 @@ Individual single-participant report (.docx + figure).
 
 Shows one participant's Performance (Cognition), Mood (Emotion) and Awareness
 (permutation entropy, plus the Lempel-Ziv companion) across the protocol,
-against their OWN baseline, with the rest of the cohort as grey context.
+against their OWN baseline only -- nothing is ranked or compared against other participants.
 With n=1 there are no significance tests -- the report is descriptive, flags
 how little usable data there is, and says so plainly.
 
@@ -119,19 +119,9 @@ def load_all(marker_csv: Path, qc_csv: Path) -> pd.DataFrame:
     return d
 
 
-def make_figure(me: pd.DataFrame, others: pd.DataFrame, out: Path, label: str) -> None:
+def make_figure(me: pd.DataFrame, out: Path, label: str) -> None:
     fig, axes = plt.subplots(2, 2, figsize=(13, 8.5))
     for ax, (col, name, log, color, _u) in zip(axes.ravel(), MARKERS):
-        o = others.dropna(subset=[col]).copy()
-        o["v"] = val(o[col], log)
-        g = o.groupby("step")["v"]
-        steps = sorted(g.groups)
-        lo = [g.get_group(s).quantile(0.25) for s in steps]
-        hi = [g.get_group(s).quantile(0.75) for s in steps]
-        med = [g.get_group(s).median() for s in steps]
-        ax.fill_between(steps, back(np.array(lo), log), back(np.array(hi), log), color="#CCCCCC", alpha=0.6, label="Rest of cohort (IQR)")
-        ax.plot(steps, back(np.array(med), log), color="#888888", linewidth=1, label="Cohort median")
-
         mine = me.dropna(subset=[col]).copy()
         mine["v"] = val(mine[col], log)
         base = mine[mine["module_id"].isin(BASELINE)]
@@ -152,7 +142,7 @@ def make_figure(me: pd.DataFrame, others: pd.DataFrame, out: Path, label: str) -
         ax.set_title(f"{name}\nusable in {n_ok} of {len(me)} recordings", fontsize=10)
         if ax is axes[0, 0]:
             ax.legend(fontsize=7, loc="best")
-    fig.suptitle(f"{label}: markers across the protocol vs. own baseline and the rest of the cohort", fontsize=13)
+    fig.suptitle(f"{label}: markers across the protocol vs. own baseline", fontsize=13)
     fig.tight_layout()
     fig.savefig(out, dpi=150)
     plt.close(fig)
@@ -176,7 +166,7 @@ def summarise(me: pd.DataFrame, col: str, log: bool) -> dict:
     return out
 
 
-def build_doc(me, others, label, subject, fig_path, clin_rows, out_path):
+def build_doc(me, label, subject, fig_path, clin_rows, out_path):
     doc = Document()
     sec = doc.sections[0]
     sec.page_width, sec.page_height = Inches(8.5), Inches(11)
@@ -213,8 +203,7 @@ def build_doc(me, others, label, subject, fig_path, clin_rows, out_path):
     doc.add_picture(str(fig_path), width=Inches(6.9))
     doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
     para(doc, "Coloured dots are this participant's recordings. The shaded colour band is their own baseline range "
-              "(dotted line = baseline mean). Grey band and line = middle 50% and median of all other participants at "
-              "each protocol step. Dashed vertical lines bracket the treatment-day session. Performance and Mood are on a "
+              "(dotted line = baseline mean). Dashed vertical lines bracket the treatment-day session. Performance and Mood are on a "
               "log scale.", size=9)
 
     doc.add_heading("3. Every recording", level=1)
@@ -248,8 +237,7 @@ def build_doc(me, others, label, subject, fig_path, clin_rows, out_path):
     for ch in ["TP9", "AF7", "AF8", "TP10"]:
         k = int(bc.str.contains(ch).sum())
         para(doc, f"- {ch}: flagged bad in {k} of {len(me)} recordings.")
-    para(doc, f"- Median share of each recording lost to dropout/artifact/muscle: {me['pct_annotated_bad'].median():.0f}% "
-              f"(cohort median {others['pct_annotated_bad'].median():.0f}%).")
+    para(doc, f"- Median share of each recording lost to dropout/artifact/muscle: {me['pct_annotated_bad'].median():.0f}%.")
     para(doc, f"- Performance usable in {int(me['cognition'].notna().sum())}, Mood in {int(me['emotion'].notna().sum())}, "
               f"Awareness in {int(me['awareness'].notna().sum())} of {len(me)} recordings. Awareness needs all four channels clean at once, "
               "so it is the first to disappear when electrode contact is poor.")
@@ -281,7 +269,6 @@ def build_doc(me, others, label, subject, fig_path, clin_rows, out_path):
         "Performance (AF8) and Mood (AF7) are frontal dry-electrode measures and are partly contaminated by facial/jaw muscle "
         "activity, which the pipeline only partly removes. A change in either may reflect muscle tension rather than brain activity.",
         "Awareness (permutation entropy) is highly stable within a person and moves very little, so small shifts are hard to interpret.",
-        "When most recordings have a bad ear electrode (TP9/TP10), the 'grey cohort band' is a comparison against cleaner data than this person's.",
     ]:
         doc.add_paragraph(t, style="List Bullet")
     doc.save(out_path)
@@ -301,7 +288,7 @@ def main() -> None:
     a.outdir.mkdir(parents=True, exist_ok=True)
     label = a.label or a.subject
     d = load_all(a.marker_summary, a.qc_summary)
-    me, others = d[d["subject_code"] == a.subject], d[d["subject_code"] != a.subject]
+    me = d[d["subject_code"] == a.subject]
     if me.empty:
         raise SystemExit(f"No recordings found for {a.subject}")
 
@@ -316,9 +303,9 @@ def main() -> None:
             clin.append({"date": date, **{k: " ".join(row.get(k, "").split()) for k in ["Dose", "RouteOfAdmin", "ClinicDetails", "AdditionalInfo"]}})
 
     fig_path = a.outdir / f"{a.subject}_markers.png"
-    make_figure(me, others, fig_path, label)
+    make_figure(me, fig_path, label)
     out = a.outdir / f"{a.subject}_study_report.docx"
-    build_doc(me, others, label, a.subject, fig_path, clin, out)
+    build_doc(me, label, a.subject, fig_path, clin, out)
     print(f"Saved {out} and {fig_path}")
 
 

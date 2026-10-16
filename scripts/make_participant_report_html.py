@@ -5,10 +5,10 @@ like the Psynautics/Muse session reports: banner, session-info bar, then
 "Longitudinal metrics", "Pre/post comparison" and "Treatment metrics" sections
 with explanatory text on the left and a chart on the right.
 
-Scores are PERCENTILE RANKS against every other participant's recordings
-(50 = typical) so the three markers can share one axis. This is a context
-scale, not a quality judgement -- the app's own 0-18 transform is not used
-because it is not available to this pipeline.
+Each marker is shown in its own units and compared ONLY with this
+participant's own baseline sessions -- nothing is ranked or compared against
+other participants. (The app's own 0-18 score transform is not used because
+it is not available to this pipeline.)
 
 Usage:
     .venv/bin/python scripts/make_participant_report_html.py --subject Sub_53 \
@@ -29,7 +29,6 @@ import matplotlib.pyplot as plt
 import mne
 import numpy as np
 import pandas as pd
-from scipy.stats import percentileofscore
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
@@ -51,59 +50,70 @@ def b64(fig) -> str:
     return base64.b64encode(buf.getvalue()).decode()
 
 
-def add_pct(me: pd.DataFrame, others: pd.DataFrame) -> pd.DataFrame:
-    me = me.copy()
-    for col, *_ in MAIN:
-        pool = others[col].dropna().to_numpy()
-        me["pct_" + col] = [percentileofscore(pool, v) if pd.notna(v) else np.nan for v in me[col]]
-    return me
+def geo(vals, log: bool) -> float:
+    """Mean of a marker's values; geometric (log-space) for the power markers, which span orders of magnitude."""
+    v = np.asarray(vals, dtype=float)
+    return float(10 ** np.log10(v).mean()) if log else float(v.mean())
 
 
 def fig_longitudinal(me: pd.DataFrame) -> str:
-    fig, ax = plt.subplots(figsize=(9, 4.8))
-    for col, name, _log, color, _u in MAIN:
-        d = me.dropna(subset=["pct_" + col])
+    fig, axes = plt.subplots(3, 1, figsize=(9, 8.2), sharex=True)
+    tx_i = MODULE_ORDER.index(TREATMENT)
+    for ax, (col, name, log, color, unit) in zip(axes, MAIN):
+        d = me.dropna(subset=[col])
+        ax.axvspan(tx_i - 0.5, tx_i + 0.5, color="#EEEEEE", zorder=0)
         if d.empty:
+            ax.text(0.5, 0.5, f"{SHORT[col]}: not available in any recording (a required channel was flagged bad)",
+                    ha="center", va="center", transform=ax.transAxes, fontsize=8, color="#888")
+            ax.set_yticks([])
             continue
-        ax.scatter(d["step"], d["pct_" + col], color=color, alpha=0.3, s=18)
-        g = d.groupby("step")["pct_" + col].mean()
-        ax.plot(g.index, g.values, "-o", color=color, label=SHORT[col], markersize=5)
-    ax.axhline(50, color="#BBBBBB", linewidth=0.8, linestyle=":")
-    ax.set_ylim(0, 100)
-    ax.set_xlim(-0.5, 10.5)
-    ax.set_xticks(range(11))
-    ax.set_xticklabels(STEP_LABELS, fontsize=7)
-    ax.set_ylabel("Percentile vs. other participants (50 = typical)", fontsize=8)
+        base = d[d["module_id"].isin(BASELINE)][col]
+        if len(base):
+            ax.axhspan(base.min(), base.max(), color=color, alpha=0.12, label="Own baseline range")
+            ax.axhline(geo(base, log), color=color, linestyle=":", linewidth=1, label="Own baseline mean")
+        ax.scatter(d["step"], d[col], color=color, alpha=0.4, s=20, label="Recordings")
+        g = d.groupby("step")[col].apply(lambda v: geo(v, log))
+        ax.plot(g.index, g.values, "-o", color=color, markersize=5, label="Step average")
+        if log:
+            ax.set_yscale("log")
+        else:
+            ax.set_ylim(0, 1)  # bounded 0-1 measure: show the full scale so tiny differences don't look dramatic
+        ax.set_ylabel(f"{SHORT[col]}\n({unit or '0-1'})", fontsize=8)
+        ax.legend(fontsize=6, loc="upper right", ncol=4, frameon=False)
+    axes[-1].set_xlim(-0.5, 10.5)
+    axes[-1].set_xticks(range(11))
+    axes[-1].set_xticklabels(STEP_LABELS, fontsize=7)
     first = me.sort_values("datetime").groupby("step")["datetime"].first()
-    top = ax.secondary_xaxis("top")
+    top = axes[0].secondary_xaxis("top")
     top.set_xticks(list(first.index))
     top.set_xticklabels([f"{t:%m-%d %H:%M}" for t in first], rotation=90, fontsize=6)
-    ax.legend(fontsize=8, loc="upper center", bbox_to_anchor=(0.5, -0.16), ncol=3, frameon=False)
+    fig.tight_layout()
     return b64(fig)
 
 
 def fig_prepost(me: pd.DataFrame) -> tuple[str, dict]:
-    fig, ax = plt.subplots(figsize=(8, 4.2))
+    fig, axes = plt.subplots(1, 3, figsize=(10, 4.2))
     info = {}
-    w = 0.36
-    for i, (col, name, _log, color, _u) in enumerate(MAIN):
-        c = "pct_" + col
-        for j, (grp, mods, alpha) in enumerate([("Pre", BASELINE, 1.0), ("Post", POST, 0.45)]):
-            v = me[me["module_id"].isin(mods)][c].dropna()
-            info[(col, grp)] = (v.mean() if len(v) else None, len(v))
+    rng = np.random.default_rng(0)
+    for ax, (col, name, log, color, unit) in zip(axes, MAIN):
+        for j, (grp, mods, alpha) in enumerate([("Baseline", BASELINE, 1.0), ("Post", POST, 0.55)]):
+            v = me[me["module_id"].isin(mods)][col].dropna()
+            info[(col, grp)] = (geo(v, log) if len(v) else None, len(v))
             if len(v):
-                ax.bar(i + (j - 0.5) * w, v.mean(), w, color=color, alpha=alpha, label=f"{SHORT[col]} {grp}")
-                if len(v) > 1:
-                    ax.errorbar(i + (j - 0.5) * w, v.mean(), yerr=v.std(), color="k", capsize=3, linewidth=1)
-                ax.text(i + (j - 0.5) * w, v.mean() + 2, f"n={len(v)}", ha="center", fontsize=7)
+                ax.hlines(geo(v, log), j - 0.3, j + 0.3, color=color, linewidth=4, alpha=alpha)
+                ax.scatter(j + rng.uniform(-0.12, 0.12, len(v)), v, color="k", s=14, zorder=5)
+                ax.text(j, 1.02, f"n={len(v)}", transform=ax.get_xaxis_transform(), ha="center", fontsize=7)
             else:
-                ax.text(i + (j - 0.5) * w, 3, "n/a", ha="center", fontsize=7, color="#888")
-    ax.set_xticks(range(3))
-    ax.set_xticklabels([SHORT[m[0]] for m in MAIN])
-    ax.set_ylim(0, 105)
-    ax.set_ylabel("Mean percentile (bars: +/- SD across sessions)", fontsize=8)
-    ax.axhline(50, color="#BBBBBB", linewidth=0.8, linestyle=":")
-    ax.legend(fontsize=7, ncol=3, loc="upper center", bbox_to_anchor=(0.5, -0.1), frameon=False)
+                ax.text(j, 0.5, "n/a", transform=ax.get_xaxis_transform(), ha="center", fontsize=8, color="#888")
+        if log:
+            ax.set_yscale("log")
+        else:
+            ax.set_ylim(0, 1)
+        ax.set_xlim(-0.6, 1.6)
+        ax.set_xticks([0, 1])
+        ax.set_xticklabels(["Baseline", "Post-treatment"], fontsize=8)
+        ax.set_title(f"{SHORT[col]}\n({unit or '0-1'})", fontsize=9, pad=14)
+    fig.tight_layout()
     return b64(fig), info
 
 
@@ -174,11 +184,12 @@ tr:nth-child(even) td{background:#fafafa}
 """
 
 
-def pct_txt(info, col):
-    pre, post = info[(col, "Pre")], info[(col, "Post")]
-    if pre[0] is None or post[0] is None:
-        return f"<b>{SHORT[col]}:</b> cannot compare (usable sessions: {pre[1]} pre, {post[1]} post)."
-    return f"<b>{SHORT[col]}:</b> pre {pre[0]:.0f}th percentile (n={pre[1]}), post {post[0]:.0f}th (n={post[1]})."
+def cmp_txt(info, col, log):
+    b, p = info[(col, "Baseline")], info[(col, "Post")]
+    if b[0] is None or p[0] is None:
+        return f"<b>{SHORT[col]}:</b> cannot compare (usable sessions: {b[1]} baseline, {p[1]} post)."
+    chg = f"x{p[0] / b[0]:.2f}" if log else f"{p[0] - b[0]:+.3f}"
+    return (f"<b>{SHORT[col]}:</b> baseline {fmt(b[0], log)} (n={b[1]}), post {fmt(p[0], log)} (n={p[1]}), change {chg}.")
 
 
 def collect(a):
@@ -186,10 +197,9 @@ def collect(a):
     label = a.label or a.subject
 
     d = load_all(a.marker_summary, a.qc_summary)
-    me, others = d[d["subject_code"] == a.subject].sort_values("datetime"), d[d["subject_code"] != a.subject]
+    me = d[d["subject_code"] == a.subject].sort_values("datetime")
     if me.empty:
         raise SystemExit(f"No recordings found for {a.subject}")
-    me = add_pct(me, others)
 
     long_png = fig_longitudinal(me)
     pp_png, info = fig_prepost(me)
@@ -254,7 +264,7 @@ def main() -> None:
     ap.add_argument("--outdir", type=Path, default=Path("output/participant_reports"))
     a = ap.parse_args()
     c = collect(a)
-    label, me, others, long_png, pp_png, info = (c[k] for k in ['label', 'me', 'others', 'long_png', 'pp_png', 'info'])
+    label, me, long_png, pp_png, info = (c[k] for k in ['label', 'me', 'long_png', 'pp_png', 'info'])
     tx_png, tx_note, tx_date, clin = (c[k] for k in ['tx_png', 'tx_note', 'tx_date', 'clin'])
     rec_rows, ch_txt, irregular, clin_html = (c[k] for k in ['rec_rows', 'ch_txt', 'irregular', 'clin_html'])
     first, last = me["datetime"].min(), me["datetime"].max()
@@ -262,13 +272,13 @@ def main() -> None:
 <div class="top"><b style="color:#3b3045;font-size:20px">PSYNAUTICS</b></div>
 <div class="banner"><h1>INDIVIDUAL STUDY REPORT</h1><div>{html.escape(label)} &nbsp;|&nbsp; RECORDINGS: {first:%Y-%m-%d} to {last:%Y-%m-%d}</div></div>
 <div class="info"><b>RECORDINGS:</b> {len(me)} &nbsp;|&nbsp; <b>PROTOCOL STEPS COVERED:</b> {me['step'].nunique()} of 11 &nbsp;|&nbsp; <b>TREATMENT DAY:</b> {tx_date or 'n/a'} &nbsp;|&nbsp; <b>DEVICE:</b> Muse S (4-channel EEG) &nbsp;|&nbsp; <b>GENERATED:</b> {dt.date.today():%Y-%m-%d}</div>
-<div class="note"><b>Read this first.</b> This is one person's data. Scores are percentile ranks against all other participants' recordings (50 = typical); they are not a measure of how good or bad anything is, and no statistical tests are possible with n=1. Data quality for this participant is limited — see the Data quality section.</div>
+<div class="note"><b>Read this first.</b> This is one person's data. Each marker is shown in its own units and compared only with this participant's own baseline sessions. Nothing here is ranked or compared against other people, none of it says what is good or bad, and no statistical tests are possible with n=1. Data quality for this participant is limited — see the Data quality section.</div>
 <div class="sec">Brain Activity</div>
 <div class="row"><h3>Longitudinal metrics</h3>
-<div class="txt"><b>Key EEG findings:</b> Performance (AF8 broadband), Mood (AF7 alpha) and Awareness (permutation entropy, all 4 channels) across the protocol, as percentiles of the rest of the cohort. Faint dots are individual recordings; lines join each step's average. Dates above the chart are each step's first recording. Gaps mean the marker could not be computed (a required electrode was flagged bad).</div>
+<div class="txt"><b>Key EEG findings:</b> Performance (AF8 broadband), Mood (AF7 alpha) and Awareness (permutation entropy, all 4 channels) across the protocol, each in its own units (Performance and Mood on a log axis). Dots are individual recordings and the line joins each step's average. The shaded band is this participant's own baseline range and the dotted line their baseline mean; the grey column marks the treatment-day session. Dates above the chart are each step's first recording. Gaps mean the marker could not be computed (a required electrode was flagged bad).</div>
 <div><img src="data:image/png;base64,{long_png}"></div></div>
 <div class="row"><h3>Pre / post comparison</h3>
-<div class="txt">Pre = baseline sessions (days 1–5 and the day-6 pre-treatment recording); post = the four post-treatment sessions. <br><br>{'<br>'.join(pct_txt(info, m[0]) for m in MAIN)}</div>
+<div class="txt">Pre = baseline sessions (days 1–5 and the day-6 pre-treatment recording); post = the four post-treatment sessions. Black dots are individual sessions; the thick line is the average (geometric for Performance and Mood). <br><br>{'<br>'.join(cmp_txt(info, m[0], m[2]) for m in MAIN)}</div>
 <div><img src="data:image/png;base64,{pp_png}"></div></div>
 <div class="row"><h3>Treatment metrics</h3>
 <div class="txt">Each marker over the treatment-day recording, per clean 4-second window, in raw units (Performance and Mood in µV²/Hz on a log axis; Awareness 0–1). Windows with dropout, artifact or muscle contamination are removed, so the line has gaps.<br><br>{html.escape(tx_note)}</div>
@@ -279,7 +289,7 @@ def main() -> None:
 <div class="sec">Data quality</div>
 <div class="row" style="grid-template-columns:1fr"><div class="txt">
 <p>Channels flagged bad (recordings affected): {ch_txt}.</p>
-<p>Median share of each recording lost to dropout, artifact or muscle activity: {me['pct_annotated_bad'].median():.0f}% (rest of cohort: {others['pct_annotated_bad'].median():.0f}%).</p>
+<p>Median share of each recording lost to dropout, artifact or muscle activity: {me['pct_annotated_bad'].median():.0f}%.</p>
 <p>Usable recordings — Performance: {int(me['cognition'].notna().sum())}, Mood: {int(me['emotion'].notna().sum())}, Awareness: {int(me['awareness'].notna().sum())} of {len(me)}. Awareness needs all four electrodes clean at once.</p>
 {('<p>Protocol irregularities: ' + '; '.join(irregular) + '.</p>') if irregular else ''}</div></div>
 <div class="sec">Self-reported treatment details</div>
@@ -288,7 +298,6 @@ def main() -> None:
 <div class="row" style="grid-template-columns:1fr"><div class="txt"><ul>
 <li>Performance and Mood come from frontal dry electrodes and are partly contaminated by facial/jaw muscle activity that the pipeline only partly removes; a change may reflect muscle tension rather than brain activity.</li>
 <li>Awareness (permutation entropy) is very stable within a person and moves little, so small changes are hard to interpret.</li>
-<li>When ear electrodes (TP9/TP10) are often bad, comparisons with the cohort are against cleaner data than this person's.</li>
 <li>Questionnaire-based sections (personality, emotionality) are not included in this version.</li></ul></div></div>
 </div></body></html>"""
     out = a.outdir / f"{a.subject}_study_report.html"
