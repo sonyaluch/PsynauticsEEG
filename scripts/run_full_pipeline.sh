@@ -32,12 +32,20 @@ echo "=== 3/5: marker extraction ==="
     --input-dir output/batch_full/clean_raw \
     --outdir output/batch_full
 
-echo "=== 4/5: cohort QC + Cognition figures ==="
+echo "=== 4/5: figures (cohort QC + each marker) ==="
+FIG="--summary output/batch_full/marker_summary.csv --outdir output/figures"
 ./.venv/bin/python scripts/make_qc_figures.py --summary output/batch_full/batch_qc_summary.csv --outdir output/figures
-./.venv/bin/python scripts/make_cognition_figures.py --summary output/batch_full/marker_summary.csv --outdir output/figures
+./.venv/bin/python scripts/make_cognition_figures.py $FIG
+./.venv/bin/python scripts/make_mood_figures.py $FIG
+./.venv/bin/python scripts/make_awareness_figures.py $FIG
 
-echo "=== 5/5: baseline vs. treatment test ==="
-./.venv/bin/python scripts/stats_baseline_vs_treatment.py --summary output/batch_full/marker_summary.csv --outdir output/figures
+echo "=== 5/5: statistics (baseline vs. treatment day, baseline vs. post-treatment) + study summary ==="
+./.venv/bin/python scripts/stats_baseline_vs_treatment.py $FIG
+./.venv/bin/python scripts/stats_baseline_vs_treatment_mood.py $FIG
+./.venv/bin/python scripts/stats_baseline_vs_treatment_awareness.py $FIG
+./.venv/bin/python scripts/stats_baseline_vs_post.py $FIG
+./.venv/bin/python scripts/make_summary_figures.py --marker-summary output/batch_full/marker_summary.csv \
+    --qc-summary output/batch_full/batch_qc_summary.csv --pairs-dir output/figures --raw-dir data/raw --outdir output/figures
 
 echo
 echo "Done. Results in output/batch_full/ and output/figures/."

@@ -88,16 +88,16 @@ def fig_messiness(qc: pd.DataFrame, marker_df: pd.DataFrame, n_raw: int, out: Pa
         ax.text(b.get_x() + b.get_width() / 2, v + 2, f"{v} ({100 * v / len(ok):.0f}%)", ha="center", fontsize=9)
     ax.set_ylim(0, max(counts) * 1.15)
     ax.set_ylabel(f"Recordings with channel flagged bad (of {len(ok)})")
-    ax.set_title("Bad channels: ear electrodes fail most often")
+    ax.set_title("Channels flagged bad for a whole recording")
 
     ax = axes[1, 0]
     emg_rate = (ok["n_emg_windows"] / ok["duration_s"] * 100).clip(upper=100)
     ax.hist(emg_rate, bins=40, color="#8172B2", edgecolor="white")
     ax.axvline(emg_rate.median(), color="k", linestyle="--", linewidth=1)
     ax.text(emg_rate.median() + 1, ax.get_ylim()[1] * 0.9, f"median {emg_rate.median():.1f}%", fontsize=9)
-    ax.set_xlabel("% of recording flagged as muscle (EMG) contaminated")
+    ax.set_xlabel("% of recording flagged as high-frequency (muscle-like) bursts")
     ax.set_ylabel("Recordings")
-    ax.set_title("Muscle contamination is common and very uneven")
+    ax.set_title("High-frequency burst share per recording")
 
     ax = axes[1, 1]
     ax.hist(ok["pct_annotated_bad"].clip(upper=110), bins=40, color="#DD8452", edgecolor="white")
@@ -105,7 +105,7 @@ def fig_messiness(qc: pd.DataFrame, marker_df: pd.DataFrame, n_raw: int, out: Pa
     ax.text(ok["pct_annotated_bad"].median() + 1, ax.get_ylim()[1] * 0.9, f"median {ok['pct_annotated_bad'].median():.0f}%", fontsize=9)
     ax.set_xlabel("% of recording annotated bad (overlaps double-count)")
     ax.set_ylabel("Recordings")
-    ax.set_title("A typical recording loses about a fifth of its time")
+    ax.set_title("Share of each recording annotated bad")
 
     fig.suptitle("Data messiness", fontsize=14)
     fig.tight_layout()
@@ -135,7 +135,8 @@ def fig_findings(pairs_dir: Path, out: Path) -> list[dict]:
         ax.set_xlim(-0.3, 1.3)
         ax.set_title(f"{name}\nn={len(p)}, {eff}, Wilcoxon p={w.pvalue:.2f}", fontsize=9)
         summary.append({"key": key, "n": len(p), "dz": diff.mean() / diff.std(), "p": w.pvalue})
-    fig.suptitle("Baseline vs. treatment (paired within subject): no marker shows a significant change", fontsize=13)
+    any_sig = any(x["p"] < 0.05 for x in summary)
+    fig.suptitle("Baseline vs. treatment day (paired within subject)" + ("" if any_sig else ": no marker shows a significant change"), fontsize=13)
     fig.tight_layout()
     fig.savefig(out, dpi=150)
     plt.close(fig)
@@ -164,7 +165,7 @@ def fig_plausibility(d: pd.DataFrame, qc: pd.DataFrame, summary: list[dict], out
     for i in range(4):
         for j in range(4):
             ax.text(j, i, f"{corr[i, j]:.2f}", ha="center", va="center", fontsize=10)
-    ax.set_title("Are the markers independent?\nPerformance and Mood largely move together (rho 0.66)", fontsize=10)
+    ax.set_title("Correlation between markers (Spearman rho)", fontsize=10)
     fig.colorbar(im, ax=ax, fraction=0.046)
 
     ax = axes[0, 1]
@@ -178,8 +179,8 @@ def fig_plausibility(d: pd.DataFrame, qc: pd.DataFrame, summary: list[dict], out
     for b, r, p in zip(bars, rs, ps):
         ax.text(b.get_x() + b.get_width() / 2, (r if r >= 0 else 0) + 0.01, f"{r:.2f}{'*' if p < 0.05 else ''}", ha="center", fontsize=10)
     ax.axhline(0, color="k", linewidth=0.8)
-    ax.set_ylabel("Spearman rho vs. % of recording flagged EMG")
-    ax.set_title("Do markers track muscle artifact? (* p<0.05)\nPerformance, Mood and LZC rise with muscle contamination", fontsize=10)
+    ax.set_ylabel("Spearman rho vs. % of recording flagged")
+    ax.set_title("Do markers track the share of high-frequency (muscle-like) bursts?\n(* p<0.05)", fontsize=10)
 
     ax = axes[1, 0]
     base = d[d["module_id"].isin(BASELINE_MODULES)]
@@ -189,7 +190,7 @@ def fig_plausibility(d: pd.DataFrame, qc: pd.DataFrame, summary: list[dict], out
         ax.text(b.get_x() + b.get_width() / 2, v + 0.02, f"{v:.2f}", ha="center", fontsize=10)
     ax.set_ylim(0, 1)
     ax.set_ylabel("ICC across baseline sessions (0=noise, 1=trait)")
-    ax.set_title("Within-subject stability\nAwareness is mostly a stable per-person trait; power markers are noisier", fontsize=10)
+    ax.set_title("Within-subject stability across baseline sessions", fontsize=10)
 
     ax = axes[1, 1]
     obs = [abs(s["dz"]) for s in summary]
@@ -200,9 +201,14 @@ def fig_plausibility(d: pd.DataFrame, qc: pd.DataFrame, summary: list[dict], out
     ax.set_xticks(x)
     ax.set_xticklabels([f"{short[k]}\nn={s['n']}" for k, s in zip(keys, summary)], fontsize=8)
     ax.set_ylabel("Standardised effect (paired Cohen's dz)")
-    ax.set_title("Statistical power\nOnly large effects (dz ~0.8-1.2) could have been detected", fontsize=10)
+    ax.set_title("Statistical power: observed effect vs. smallest detectable", fontsize=10)
     ax.legend(fontsize=8)
 
+    print("plausibility numbers:")
+    print("  inter-marker Spearman:", {f"{keys[i]}-{keys[j]}": round(float(corr[i, j]), 2) for i in range(4) for j in range(i + 1, 4)})
+    print("  rho vs HF-burst share:", {k: (round(r, 2), round(p_, 3)) for k, r, p_ in zip(keys, rs, ps)})
+    print("  ICC (baseline sessions):", {k: round(v, 2) for k, v in zip(keys, iccs)})
+    print("  observed |dz| / detectable dz:", [(k, round(o, 2), round(dd, 2), s_["n"]) for k, o, dd, s_ in zip(keys, obs, det, summary)])
     fig.suptitle("Study plausibility checks", fontsize=14)
     fig.tight_layout()
     fig.savefig(out, dpi=150)

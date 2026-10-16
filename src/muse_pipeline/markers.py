@@ -54,13 +54,20 @@ def _make_epochs(raw: mne.io.RawArray, reject_by_annotation: bool) -> mne.Epochs
     )
 
 
+def epoch_psd_uv2(epochs: mne.Epochs, ch_name: str, fmin: float, fmax: float) -> tuple[np.ndarray, np.ndarray]:
+    """Per-epoch Welch PSD in uV^2/Hz for one channel: returns (psd[n_epochs, n_freqs], freqs)."""
+    spec = epochs.compute_psd(
+        method="welch", picks=[ch_name], fmin=fmin, fmax=fmax,
+        n_fft=config.PSD_N_FFT, n_per_seg=config.PSD_N_FFT, n_overlap=config.PSD_N_FFT // 2, verbose=False,
+    )
+    return spec.get_data()[:, 0, :] * 1e12, spec.freqs  # V^2/Hz -> uV^2/Hz
+
+
 def _band_power_uv2(epochs: mne.Epochs, ch_name: str, band: str) -> float:
     """Mean PSD (uV^2/Hz) in `band` at `ch_name`, averaged across epochs (mean across freq bins within the band, NOT integrated/summed -- this is spectral density, not total band power)."""
     fmin, fmax = config.FREQ_BANDS_HZ[band]
-    spectrum = epochs.compute_psd(picks=[ch_name], fmin=fmin, fmax=fmax, verbose=False)
-    psd = spectrum.get_data()  # (n_epochs, 1, n_freqs), V^2/Hz
-    band_power_per_epoch = psd.mean(axis=-1)[:, 0] * 1e12  # V^2/Hz -> uV^2/Hz
-    return float(np.mean(band_power_per_epoch))
+    psd, _ = epoch_psd_uv2(epochs, ch_name, fmin, fmax)
+    return float(np.mean(psd.mean(axis=-1)))
 
 
 def _awareness_channel_score(epochs: mne.Epochs, ch_name: str) -> float:

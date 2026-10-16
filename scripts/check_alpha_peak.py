@@ -26,7 +26,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from muse_pipeline import config  # noqa: E402
-from muse_pipeline.markers import _make_epochs  # noqa: E402
+from muse_pipeline.markers import _make_epochs, epoch_psd_uv2  # noqa: E402
 
 ALPHA_LO, ALPHA_HI = config.FREQ_BANDS_HZ["alpha"]
 GUARD_LO, GUARD_HI = 6.0, 15.0  # excluded from the background fit
@@ -35,10 +35,8 @@ PEAK_RATIO_THRESHOLDS = [1.25, 1.5, 2.0]
 
 
 def channel_psd(epochs: mne.Epochs, ch_name: str) -> tuple[np.ndarray, np.ndarray]:
-    spectrum = epochs.compute_psd(picks=[ch_name], fmin=FIT_FMIN, fmax=FIT_FMAX, verbose=False)
-    psd = spectrum.get_data()[:, 0, :].mean(axis=0) * 1e12  # mean across epochs, V^2/Hz -> uV^2/Hz
-    freqs = spectrum.freqs
-    return freqs, psd
+    psd, freqs = epoch_psd_uv2(epochs, ch_name, FIT_FMIN, FIT_FMAX)
+    return freqs, psd.mean(axis=0)  # mean across epochs, uV^2/Hz
 
 
 def fit_background(freqs: np.ndarray, psd: np.ndarray) -> tuple[float, float]:

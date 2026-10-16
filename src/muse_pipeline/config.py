@@ -70,36 +70,50 @@ BANDPASS_HIGH_HZ = 45.0
 # handled defensively in preprocess.py.
 NOTCH_FREQS_HZ = [60.0]
 
-# ASSUMPTION: a channel is "globally bad" for the WHOLE recording (not just
-# a transient window) if its overall MAD is far higher than its sibling
-# channels'. EMPIRICAL BASIS: known-clean recordings show ~2x spread across
-# per-channel MAD; recordings with a visually-confirmed bad electrode (poor
-# contact for the whole session) show 12-140x. 5x sits clear of both and is
-# how these get caught -- the per-window artifact check below normalizes
-# each channel against its OWN whole-recording baseline, so it's blind to a
-# channel that's uniformly noisy throughout (no clean baseline to compare
-# against within that channel).
-GLOBAL_BAD_CHANNEL_MAD_RATIO = 5.0
+# The Muse sends 12-sample packets at 256 Hz, i.e. 21.33 packets/s. Some
+# channels in some recordings carry a narrow interference spike at exactly
+# that packet rate and its harmonic (found in the RAW samples, up to ~14x the
+# neighbouring noise floor; a 17 Hz control frequency shows none), and both
+# fall inside the 1-44 Hz Cognition window. Removed with narrow notches.
+PACKET_RATE_NOTCH_HZ = [NOMINAL_SFREQ / 12, 2 * NOMINAL_SFREQ / 12]
+PACKET_RATE_NOTCH_WIDTH_HZ = 1.0
 
-# ASSUMPTION: a window is flagged BAD_EMG if the ratio of high-frequency
-# (20-40Hz) to low-frequency (1-10Hz) mean power exceeds this threshold.
-# Cortical EEG has a roughly 1/f spectrum (low >> high); EMG has a much
-# flatter, broadband spectrum, so a channel/window with disproportionate
-# high-frequency power relative to low is a signature of muscle artifact
-# bleeding in, not brain signal. EMPIRICAL BASIS (2026-08-30): sampled
-# ~174k channel-windows across 60 recordings -- the ratio distribution has
-# no clean gap (10th pct 0.017, median 0.059, 90th pct 0.163, 99th pct
-# 0.323), consistent with the bad-channel-MAD-ratio threshold (also no
-# clean gap; confirmed by eye instead). What DOES separate clean from
-# suspect recordings is the *rate* of high-ratio windows: a known-clean
-# reference recording has ~0.3% of windows above 0.3, vs 1.8-3.0% in
-# recordings with a visually-confirmed spectral bump (see the CAVEAT above
-# COGNITION_CHANNEL). 0.3 sits at roughly the 99th percentile overall while
-# concentrating on the already-suspect files, rather than flagging a large
-# fraction of the whole cohort the way a lower threshold would.
-EMG_LOW_BAND_HZ = (1.0, 10.0)
+# A channel is "globally bad" for the WHOLE recording (poor electrode contact
+# throughout) if the MAD of its filtered signal exceeds this many microvolts.
+# Absolute rather than relative-to-sibling-channels because (a) the per-window
+# artifact check normalises each channel against its own baseline and so is
+# blind to a channel that is uniformly noisy, and (b) a sibling-relative rule
+# both misses cases where several channels are bad at once and mis-flags a
+# normal channel sitting next to an unusually quiet one (both seen in review).
+#
+# EMPIRICAL BASIS (corrected signal, 952 channel-recordings): the median
+# channel has MAD ~7 uV (IQR 4.7-12); there is no natural gap -- the tail runs
+# continuously from ~11 to ~580 uV -- so the cutoff is a judgement call. 30 uV
+# (~4x the median; SD-equivalent ~44 uV) flags ~12% of channels and agrees with
+# the earlier sibling-ratio rule on ~100 of ~118 channels. Valid because the
+# export is in real microvolts (baseline ~800, hard rails at 0 and ~1650,
+# matching the Muse's documented 0-1682.8 uV range).
+GLOBAL_BAD_CHANNEL_MAD_UV = 30.0
+
+# A 1 s window is flagged BAD_EMG when its high-frequency (20-40Hz) power is
+# far above that channel's OWN typical level in the same recording: robust
+# z-score of log10 HF power (median / MAD over the whole recording) above the
+# threshold below. Muscle (EMG) activity shows up as bursts of broadband HF
+# power; flagging relative to the recording's own baseline avoids needing any
+# absolute spectral shape.
+#
+# HISTORY: the first version flagged windows where the HF/LF power ratio
+# exceeded 0.3, calibrated on spectra that were distorted by a loader bug
+# (arrival-time resampling, see io.py) which suppressed HF power ~4x. On the
+# correctly-timed signal the Muse spectrum is nearly flat above 10Hz (dry-
+# electrode noise floor), so the typical ratio is ~0.3 and that rule flagged
+# nearly everything -- an absolute-ratio rule cannot work here.
+#
+# EMPIRICAL BASIS (corrected signal): at 5 MAD the median channel-recording has
+# ~1% of windows flagged, the 90th percentile ~9%; 5 MAD of log10 HF power is
+# ~15x the recording's typical HF power.
 EMG_HIGH_BAND_HZ = (20.0, 40.0)
-EMG_RATIO_THRESH = 0.3
+EMG_HF_ZSCORE_THRESH = 5.0
 
 # --- Artifact rejection ------------------------------------------------------
 # Robust (MAD-based) z-score threshold for flagging short windows as
@@ -122,6 +136,13 @@ ARTIFACT_MAD_ZSCORE_THRESH = 5.0
 # BAD_* annotation are dropped entirely (via MNE's reject_by_annotation).
 MARKER_EPOCH_S = 4.0
 
+# PSD estimation: Welch, 1 s segments (1 Hz resolution at 256 Hz) with 50%
+# overlap, averaged within each 4 s epoch. Stated explicitly because MNE's
+# Epochs.compute_psd() DEFAULTS TO MULTITAPER, whose default normalisation is
+# not divided by the sampling rate -- it returned values 256x larger than true
+# spectral density (uV^2/Hz), found by a white-noise unit test.
+PSD_N_FFT = 256
+
 FREQ_BANDS_HZ = {
     "delta": (1.0, 4.0),
     "theta": (4.0, 8.0),
@@ -132,22 +153,15 @@ FREQ_BANDS_HZ = {
     "mood_alpha": (7.5, 13.0),  # Emotion/Mood's alpha band -- confirmed distinct from the general "alpha" above
 }
 
-# CAVEAT: broadband power at frontal/dry-electrode sites (AF8 here) is a
-# well-documented target for frontalis-muscle EMG contamination, which is
-# NOT distinguished from cortical activity by this pipeline -- the
-# per-window and global-bad-channel checks catch amplitude outliers, not
-# EMG's broadband spectral signature. Investigated 2026-08-30 (when
-# Cognition was still beta-band only): a spectral bump in the ~15-20Hz
-# range appears in several "clean" (non-excluded) recordings. Ruled out as
-# a resampling/interpolation artifact (synthetic white noise resampled
-# through the same recording's real irregular timestamps shows no
-# comparable bump), and its frequency is inconsistent across recordings
-# (not a fixed hardware/electronic artifact) -- both point toward genuine
-# EMG rather than a pipeline bug. Broadband power is, if anything, MORE
-# exposed to this than the original beta-only definition was, since it now
-# spans the same contaminated range plus everything else. Treat Cognition
-# as a mix of cortical activity and muscle artifact until a dedicated EMG
-# check goes beyond the current coarse per-window BAD_EMG flag.
+# CAVEAT: broadband power at a frontal dry-electrode site (AF8) can include
+# facial/jaw muscle activity (EMG) and other noise that is not cortical. The
+# pipeline removes dropouts, amplitude artifacts, whole-recording bad
+# channels, high-frequency bursts (BAD_EMG) and BLE packet-rate interference,
+# but cannot separate residual muscle activity from brain activity with 4
+# channels. NOTE: an earlier version of this note described a "15-20Hz
+# spectral bump" as muscle artifact. That bump was produced by a loader bug
+# (samples were resampled on packet-ARRIVAL times, see io.py) and does not
+# exist in the correctly-timed signal -- that conclusion is withdrawn.
 #
 # CONFIRMED (per an update from the study): Cognition is AF8 broadband
 # power (delta through gamma, 1-44Hz), not beta-band only -- corrected from

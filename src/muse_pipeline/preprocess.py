@@ -35,30 +35,18 @@ class PreprocessReport:
 
 
 def _detect_globally_bad_channels(raw: mne.io.RawArray) -> list[str]:
-    """Flag a channel bad for the WHOLE recording if its overall MAD is far
-    higher than its sibling channels' -- see GLOBAL_BAD_CHANNEL_MAD_RATIO in
-    config.py for the empirical basis. This catches persistently poor
-    electrode contact for an entire session, which the per-window artifact
-    check below cannot: that check normalizes each channel against its own
-    whole-recording baseline, so a channel that's uniformly noisy throughout
-    has no clean baseline within itself to look anomalous against.
+    """Flag a channel bad for the WHOLE recording if the MAD of its filtered
+    signal exceeds GLOBAL_BAD_CHANNEL_MAD_UV microvolts (see config.py for the
+    empirical basis). This catches persistently poor electrode contact, which
+    the per-window artifact check below cannot: that check normalises each
+    channel against its own whole-recording baseline, so a channel that is
+    uniformly noisy throughout has no clean baseline within itself to look
+    anomalous against.
     """
-    data = raw.get_data()
+    data = raw.get_data() * 1e6  # volts -> uV
     medians = np.median(data, axis=1)
     mads = np.median(np.abs(data - medians[:, None]), axis=1)
-    bad = []
-    for i, ch in enumerate(raw.ch_names):
-        other_mads = np.delete(mads, i)
-        # min, not median: with only 3 "other" channels, if 2 channels are
-        # simultaneously bad (e.g. AF7+AF8, physically adjacent and both
-        # susceptible to the same frontalis muscle contraction), the median
-        # of the other 3 gets dragged up by whichever other channel is also
-        # bad, masking both. min only requires ONE of the other 3 to be
-        # genuinely clean, which holds as long as at most 3 of the 4
-        # channels are bad simultaneously.
-        if mads[i] > config.GLOBAL_BAD_CHANNEL_MAD_RATIO * np.min(other_mads):
-            bad.append(ch)
-    return bad
+    return [ch for ch, m in zip(raw.ch_names, mads) if m > config.GLOBAL_BAD_CHANNEL_MAD_UV]
 
 
 def _flag_artifact_windows(raw: mne.io.RawArray) -> tuple[list[tuple[float, float, str]], dict[str, int]]:
@@ -111,55 +99,45 @@ def _flag_artifact_windows(raw: mne.io.RawArray) -> tuple[list[tuple[float, floa
 
 
 def _flag_emg_windows(raw: mne.io.RawArray) -> tuple[list[tuple[float, float, str]], dict[str, int]]:
-    """Flag a window BAD_EMG if the ratio of high-frequency (20-40Hz) to
-    low-frequency (1-10Hz) power at a channel exceeds EMG_RATIO_THRESH.
+    """Flag a window BAD_EMG when its 20-40Hz power is a large outlier for that
+    channel within this recording (robust z-score of log10 HF power > EMG_HF_ZSCORE_THRESH).
 
-    Distinguishes muscle artifact from cortical activity by spectral SHAPE
-    rather than amplitude: cortical EEG has a roughly 1/f spectrum, EMG is
-    much flatter/broadband. This catches contamination the amplitude-based
-    MAD z-score check above can miss -- e.g. jaw clenching or frowning that
-    doesn't necessarily produce an outlier amplitude spike, but does flatten
-    the spectrum. See config.py for the empirical threshold basis.
+    Muscle activity appears as bursts of broadband high-frequency power. The
+    reference is the channel's own median/MAD over the whole recording, so no
+    absolute spectral shape is assumed (the Muse spectrum is nearly flat above
+    10Hz, which defeats a fixed HF/LF ratio -- see config.py). Complements the
+    amplitude-based check above, which can miss HF-only bursts.
 
-    Channels already in raw.info["bads"] are skipped, same as the artifact
-    check above.
+    Channels already in raw.info["bads"] are skipped, same as the artifact check.
     """
     sfreq = raw.info["sfreq"]
     win_samples = int(round(config.ARTIFACT_WINDOW_S * sfreq))
     data = raw.get_data()
-    n_channels, n_samples = data.shape
-    n_windows = n_samples // win_samples
+    n_windows = data.shape[1] // win_samples
 
     freqs = np.fft.rfftfreq(win_samples, d=1.0 / sfreq)
-    low_mask = (freqs >= config.EMG_LOW_BAND_HZ[0]) & (freqs <= config.EMG_LOW_BAND_HZ[1])
-    high_mask = (freqs >= config.EMG_HIGH_BAND_HZ[0]) & (freqs <= config.EMG_HIGH_BAND_HZ[1])
+    hi = (freqs >= config.EMG_HIGH_BAND_HZ[0]) & (freqs <= config.EMG_HIGH_BAND_HZ[1])
     window_fn = np.hanning(win_samples)
 
     good_chs = [ch for ch in raw.ch_names if ch not in raw.info["bads"]]
     per_channel_flags = {ch: 0 for ch in good_chs}
-    annotations: list[tuple[float, float, str]] = []
-
-    for w in range(n_windows):
-        start = w * win_samples
-        stop = start + win_samples
-        window_bad = False
+    flagged = np.zeros(n_windows, dtype=bool)
+    if n_windows:
+        segs = data[:, : n_windows * win_samples].reshape(len(raw.ch_names), n_windows, win_samples) * window_fn
+        hf_power = (np.abs(np.fft.rfft(segs, axis=-1)) ** 2)[..., hi].mean(axis=-1)
         for ci, ch in enumerate(raw.ch_names):
             if ch not in good_chs:
                 continue
-            seg = data[ci, start:stop] * window_fn
-            psd = np.abs(np.fft.rfft(seg)) ** 2
-            low = psd[low_mask].mean()
-            high = psd[high_mask].mean()
-            if low <= 0:
+            log_p = np.log10(np.maximum(hf_power[ci], 1e-30))
+            med = np.median(log_p)
+            mad = 1.4826 * np.median(np.abs(log_p - med))
+            if mad == 0:
                 continue
-            if (high / low) > config.EMG_RATIO_THRESH:
-                per_channel_flags[ch] += 1
-                window_bad = True
-        if window_bad:
-            onset = start / sfreq
-            duration = win_samples / sfreq
-            annotations.append((onset, duration, "BAD_EMG"))
+            bad = (log_p - med) / mad > config.EMG_HF_ZSCORE_THRESH
+            per_channel_flags[ch] = int(bad.sum())
+            flagged |= bad
 
+    annotations = [(w * win_samples / sfreq, win_samples / sfreq, "BAD_EMG") for w in np.where(flagged)[0]]
     return annotations, per_channel_flags
 
 
@@ -177,6 +155,8 @@ def preprocess_raw(raw: mne.io.RawArray) -> tuple[mne.io.RawArray, PreprocessRep
     notch = [f for f in config.NOTCH_FREQS_HZ if f < min(nyquist, config.BANDPASS_HIGH_HZ)]
     if notch:
         raw.notch_filter(notch, verbose=False)
+    # BLE packet-rate interference (21.33 Hz + harmonic), see config.py
+    raw.notch_filter(config.PACKET_RATE_NOTCH_HZ, notch_widths=config.PACKET_RATE_NOTCH_WIDTH_HZ, verbose=False)
 
     # Defense-in-depth: a NaN anywhere in the signal at this point would
     # silently poison every downstream computation that touches it (band

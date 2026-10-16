@@ -36,7 +36,7 @@ class LoadReport:
 
     path: Path
     n_raw_samples: int
-    n_nan_dropped: int
+    n_nan_samples: int  # sensor NaN readings (all channels); interpolated, not deleted
     duration_s: float
     n_dropouts: int
     total_dropout_s: float
@@ -59,11 +59,33 @@ def parse_filename_metadata(path: Path) -> dict:
     return d
 
 
-def _find_dropouts(ts: np.ndarray) -> list[tuple[float, float]]:
-    """Return (start_time, duration) for every gap exceeding the jitter tolerance."""
-    dt = np.diff(ts)
-    gap_idx = np.where(dt > config.MAX_JITTER_S)[0]
-    return [(float(ts[i]), float(dt[i])) for i in gap_idx]
+def _sample_positions(ts: np.ndarray) -> tuple[np.ndarray, int]:
+    """Grid position (in samples at NOMINAL_SFREQ) of every row, honouring genuine gaps.
+
+    The Muse sends 12-sample packets and stamps every row with the packet's
+    ARRIVAL time, so rows inside a packet are only ~0.05 ms apart and arrival
+    times jitter by tens of ms -- they are NOT the samples' true times. The
+    samples themselves are a continuous 256 Hz stream (verified: gap-free runs
+    contain 256.1 rows/s, and the 60 Hz mains line lands at exactly 60.0 Hz
+    only when rows are treated as consecutive samples). So rows keep their
+    order and sit on consecutive grid positions; arrival times are used only to
+    size a hole where an arrival gap exceeds MAX_JITTER_S (samples were lost).
+    """
+    gaps = np.maximum(np.diff(ts), 0.0)
+    big = np.where(gaps > config.MAX_JITTER_S)[0]
+    missing = np.maximum(np.round(gaps[big] * config.NOMINAL_SFREQ).astype(int) - 1, 1)
+    add = np.zeros(len(ts), dtype=np.int64)
+    add[big + 1] = missing
+    pos = np.arange(len(ts)) + np.cumsum(add)
+    return pos, int(pos[-1]) + 1
+
+
+def _runs(mask: np.ndarray) -> list[tuple[int, int]]:
+    """(start, length) of every run of True in a boolean array."""
+    if not mask.any():
+        return []
+    edges = np.diff(np.r_[0, mask.astype(np.int8), 0])
+    return [(int(a_), int(b_ - a_)) for a_, b_ in zip(np.where(edges == 1)[0], np.where(edges == -1)[0])]
 
 
 def load_muse_csv(path: str | Path) -> tuple[mne.io.RawArray, LoadReport]:
@@ -109,40 +131,44 @@ def load_muse_csv(path: str | Path) -> tuple[mne.io.RawArray, LoadReport]:
             "format and is excluded rather than processed."
         )
 
-    # Some exports contain a handful of NaN readings on individual channels --
-    # a sensor read glitch, not a BLE gap (the packet has a valid timestamp
-    # but a missing/corrupt channel value). Left in place, a NaN poisons
-    # np.interp's output around it, and FIR filtering later spreads that into
-    # a much wider NaN block (its convolution window) well beyond the
-    # original bad sample -- observed as a 32s NaN gap in one recording from
-    # just 12 raw NaN samples, completely unflagged by any annotation.
-    # Dropping the affected rows folds this into the existing dropout path:
-    # if enough consecutive rows are affected, the resulting timestamp gap is
-    # picked up by _find_dropouts and annotated BAD_dropout like any other.
-    n_before_nan_drop = len(df)
-    df = df.dropna(subset=list(config.RAW_TO_MUSE_CHANNEL))
-    n_nan_dropped = n_before_nan_drop - len(df)
-
-    df = df.sort_values("ts").drop_duplicates(subset="ts").reset_index(drop=True)
+    # Row order IS sample order (the export writes packets as they arrive).
+    # Deliberately NOT sorted by timestamp: back-to-back packets can carry
+    # stamps within a fraction of a millisecond of each other, and sorting
+    # would interleave their samples.
     ts = df["ts"].to_numpy(dtype=np.float64)
     if len(ts) < 2:
         raise ValueError(f"{path.name}: not enough samples to process ({len(ts)}).")
 
-    duration_s = float(ts[-1] - ts[0])
-    n_target = int(round(duration_s * config.NOMINAL_SFREQ)) + 1
-    target_ts = ts[0] + np.arange(n_target) / config.NOMINAL_SFREQ
+    pos, n_total = _sample_positions(ts)
+    fs = config.NOMINAL_SFREQ
 
-    dropouts = _find_dropouts(ts)
-
-    data = np.empty((len(config.MUSE_CHANNEL_ORDER), n_target), dtype=np.float64)
+    # Lay each channel's real samples onto the grid. Holes (lost samples) and
+    # sensor NaNs are NaN here; they are filled by linear interpolation so the
+    # filters see a continuous signal, and runs of >= ~MAX_JITTER_S are
+    # annotated BAD_dropout so nothing downstream treats them as real signal.
+    # (Previously NaN rows were deleted, which silently shortened the timeline.
+    # Left as NaN in the filter input they would be smeared over seconds.)
+    data = np.full((len(config.MUSE_CHANNEL_ORDER), n_total), np.nan)
+    n_nan_samples = 0
     for i, raw_col in enumerate(config.RAW_TO_MUSE_CHANNEL):
-        data[i] = np.interp(target_ts, ts, df[raw_col].to_numpy(dtype=np.float64))
-    # ASSUMPTION: exported values are already in microvolts (baseline ~800,
-    # per-channel std ~7-24 in the sample file -- consistent with uV-scale
-    # EEG fluctuations, not raw 12-bit ADC counts). MNE's internal convention
-    # for EEG data is volts, so convert uV -> V here. If this export format
-    # turns out to be raw ADC counts instead, replace this with the correct
-    # counts-to-uV calibration formula before this line.
+        v = df[raw_col].to_numpy(dtype=np.float64)
+        n_nan_samples += int(np.isnan(v).sum())
+        data[i, pos] = v
+    missing = np.isnan(data).any(axis=0)
+    grid = np.arange(n_total)
+    for i in range(data.shape[0]):
+        ok = ~np.isnan(data[i])
+        if not ok.any():
+            raise ValueError(f"{path.name}: channel {config.MUSE_CHANNEL_ORDER[i]} has no valid samples.")
+        data[i] = np.interp(grid, grid[ok], data[i, ok])
+
+    min_run = max(int(config.MAX_JITTER_S * fs) - 1, 1)
+    dropouts = [(st / fs, ln / fs) for st, ln in _runs(missing) if ln >= min_run]
+    duration_s = n_total / fs
+
+    # ASSUMPTION (checked): exported values are in microvolts -- baseline ~800
+    # with hard rails at 0 and ~1650, matching the Muse's documented 0-1682.8
+    # uV range. MNE's internal convention for EEG is volts, so convert here.
     data *= config.RAW_UNITS_TO_VOLTS
 
     info = mne.create_info(
@@ -150,10 +176,6 @@ def load_muse_csv(path: str | Path) -> tuple[mne.io.RawArray, LoadReport]:
         sfreq=config.NOMINAL_SFREQ,
         ch_types="eeg",
     )
-    # Muse "raw" units aren't a confirmed calibrated physical unit; MNE
-    # internally assumes volts for EEG. We keep values as-exported (do not
-    # rescale) and note this explicitly rather than silently asserting a
-    # unit that hasn't been verified.
     raw = mne.io.RawArray(data, info, verbose=False)
     try:
         raw.set_montage(mne.channels.make_standard_montage("standard_1020"), on_missing="warn")
@@ -161,12 +183,10 @@ def load_muse_csv(path: str | Path) -> tuple[mne.io.RawArray, LoadReport]:
         pass
 
     if dropouts:
-        onsets = [t - ts[0] for t, _dur in dropouts]
-        durations = [dur for _t, dur in dropouts]
         raw.set_annotations(
             mne.Annotations(
-                onset=onsets,
-                duration=durations,
+                onset=[t for t, _d in dropouts],
+                duration=[d for _t, d in dropouts],
                 description=["BAD_dropout"] * len(dropouts),
             )
         )
@@ -178,7 +198,7 @@ def load_muse_csv(path: str | Path) -> tuple[mne.io.RawArray, LoadReport]:
     report = LoadReport(
         path=path,
         n_raw_samples=len(ts),
-        n_nan_dropped=n_nan_dropped,
+        n_nan_samples=n_nan_samples,
         duration_s=duration_s,
         n_dropouts=len(dropouts),
         total_dropout_s=total_dropout_s,

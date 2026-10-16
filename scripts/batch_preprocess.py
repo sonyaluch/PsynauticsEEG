@@ -131,7 +131,7 @@ def main() -> None:
 
             result.update(
                 duration_s=load_report.duration_s,
-                n_nan_dropped=load_report.n_nan_dropped,
+                n_nan_samples=load_report.n_nan_samples,
                 n_dropouts=load_report.n_dropouts,
                 pct_dropout=load_report.pct_dropout,
                 max_gap_s=load_report.max_gap_s,

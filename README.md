@@ -13,30 +13,33 @@ Three derived markers are extracted per recording in the analysis,
 
 ## What it does
 
-Muse streams over BLE in irregular packet bursts, which we need to account for.
+The Muse sends its EEG over Bluetooth in 12-sample packets, and the export stamps every row with the packet's
+*arrival* time -- so rows inside a packet are ~0.05 ms apart and arrival times jitter by tens of ms. These stamps are
+**not** the samples' true times. The samples themselves are a continuous 256 Hz stream.
 
 The loader (`src/muse_pipeline/io.py`):
 
-1. Reads true per-sample timestamps from the CSV export.
-2. Resamples onto a uniform grid at the nominal 256 Hz via linear
-   interpolation (MNE requires evenly-sampled data).
-3. Flags any inter-sample gap over 200ms as a real dropout (vs. normal
-   ~46ms BLE packet cadence) and annotates it `BAD_dropout`, so interpolated
-   samples inside the gap are excluded from any annotation-aware downstream step.
+1. Treats rows, in file order, as consecutive 256 Hz samples (it deliberately does not sort or resample on the timestamps).
+2. Uses arrival times only to size a hole where a gap exceeds 200 ms (samples were lost). Holes and sensor NaNs are filled by
+   linear interpolation so the filters see a continuous signal, and runs of 0.2 s or more are annotated `BAD_dropout`.
+
+(An earlier version resampled on the arrival times, which distorted the spectrum -- low frequencies inflated ~2x, 30-44 Hz cut ~4x,
+the 60 Hz mains line nearly erased. `tests/test_loader_timebase.py` now guards against this with a synthetic signal of known frequencies.)
 
 The preprocessor (`src/muse_pipeline/preprocess.py`) then:
 
-1. Band-pass filters (1-45 Hz) and notch-filters (60 Hz mains).
-2. Flags short artifact windows per-channel using a robust MAD-based z-score computed over the whole recording (instead of doing it per-window, which
-   would allow a sustained artifact to hide by normalizing against itself).
+1. Band-pass filters 1-45 Hz and notches the Bluetooth packet-rate interference (21.33 Hz and its 42.67 Hz harmonic).
+   The 60 Hz mains line is already outside the passband.
+2. Flags 1 s windows per channel as `BAD_artifact` using a robust MAD-based z-score computed over the whole recording.
+3. Flags 1 s windows as `BAD_EMG` where 20-40 Hz power is a large outlier for that channel in that recording (robust z > 5 on log power).
 
 Only 4 channels means that ICA and spherical-spline interpolation are unreliable (too few spatial degrees of freedom)
 Data is never discarded, but instead annotated as `BAD_*` or `raw.info["bads"]` flags.
 These tags are excluded in marker extraction.
 
-Any channel that is uniformly bad for the *whole* recording (e.g. persistently poor electrode contact) is auto-detected and added to `raw.info["bads"]`: its overall MAD is compared against its sibling channels'.
+Any channel that is uniformly bad for the *whole* recording (e.g. persistently poor electrode contact) is auto-detected and added to `raw.info["bads"]`: its filtered signal's MAD exceeds 30 µV (about 4x the typical channel).
 
-Marker extraction (`src/muse_pipeline/markers.py`) then epochs the cleaned signal into fixed 4s windows (excluding any epoch overlapping a `BAD_*` annotation) and computes, per recording:
+Marker extraction (`src/muse_pipeline/markers.py`) then epochs the cleaned signal into fixed 4s windows (excluding any epoch overlapping a `BAD_*` annotation), estimates the spectrum with Welch's method (1 s segments, 50% overlap, explicit because MNE's default for epochs is multitaper, which is not scaled to µV²/Hz), and computes, per recording:
 
 - **Cognition** ("Performance"): mean broadband (delta through gamma, 1-44Hz) power spectral density at AF8 (µV²/Hz, not integrated band power). Corrected from an earlier beta-band-only (13-30Hz) definition per an update from the study.
 - **Emotion** ("Mood"): mean alpha-band (7.5-13Hz) power spectral density at AF7 (µV²/Hz). Corrected from an earlier AF7-vs-AF8 alpha asymmetry formula per an update from the study -- now single-channel, so only needs AF7 clean (not both AF7 and AF8).
@@ -132,17 +135,24 @@ gcloud storage cp -r gs://psynautics-files/2026_Feb_files/eeg/* data/raw/
 The export manifest (`eeg_summary.csv`) and `participant_key_CONFIDENTIAL.csv`
 (the email -> pseudonymous subject-code mapping) are kept outside github entirely, so never commit them.
 
-## Known assumptions
+## Known assumptions and limits
 
+- Raw CSV values are in microvolts (baseline ~800 with hard rails at 0 and ~1650, matching the Muse's documented 0-1682.8 µV range).
+- `ch1`-`ch4` map to `TP9, AF7, AF8, TP10` in that order (the standard Muse electrode order).
+- `ch5`/`ch6` are unused aux columns, optional, and ignored when empty; a file where they contain real data doesn't match the expected
+  4-channel EEG-only export and is excluded.
+- All three marker definitions are CONFIRMED per an update from the study: Performance/Cognition = AF8 broadband 1-44 Hz,
+  Mood/Emotion = AF7 alpha 7.5-13 Hz, Awareness = permutation entropy over all four channels. The Lempel-Ziv value is an extra
+  companion measure, not part of the Awareness definition. Values are mean PSD (µV²/Hz), not integrated band power.
+- The 5 MAD thresholds and the 30 µV bad-channel cutoff are judgement calls: the corrected data show no natural gap to place them in.
+  See the comments in `config.py` for the evidence behind each.
+- Performance and Mood come from frontal dry electrodes and may include facial/jaw muscle activity, which 4 channels cannot fully separate
+  from brain activity.
+- The recordings' protocol-step labels come from the app and are used as-is; some participants have repeated, missing or out-of-order steps.
 
-- Raw CSV channel values are already in microvolts (not raw ADC counts).
-- `ch1`-`ch4` map to `TP9, AF7, AF8, TP10` in that order (the standard Muse  electrode order used by muse-lsl, BlueMuse, Mind Monitor).
-- `ch5`/`ch6` are unused aux columns, optional, and ignored when empty; a file where they contain real data doesn't match the expected 4-channel
-  EEG-only export and is excluded.
-- A channel is "globally bad" for a whole recording if its overall MAD is more than 5x its sibling channels'
-- All three marker definitions are now CONFIRMED per an update from the study (previously ASSUMPTION-tagged literature-standard guesses).
-  Cognition's guess (beta-band-only, 13-30Hz) turned out wrong -- corrected to broadband (1-44Hz), which required widening the pipeline's
-  bandpass filter from 40Hz to 45Hz. Emotion/Mood's guess (AF7-vs-AF8 asymmetry) also turned out wrong -- corrected to single-channel AF7
-  alpha power (7.5-13Hz). Awareness's guess (LZC averaged with permutation entropy) turned out wrong -- corrected to permutation entropy alone.
-- Cognition and Emotion/Mood (broadband/alpha PSD at AF8/AF7, both frontal dry-electrode sites) are likely a mix of cortical activity and
-  frontalis-muscle EMG artifact
+## Tests
+
+```bash
+./.venv/bin/python tests/test_loader_timebase.py   # known sinusoids through a Muse-like packetised stream
+./.venv/bin/python tests/test_filter_markers.py    # filter gain, PSD units, epoch rejection, entropy
+```

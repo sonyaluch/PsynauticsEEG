@@ -36,7 +36,7 @@ from make_participant_report import (  # noqa: E402
     BASELINE, MARKERS, MODULE_ORDER, POST, TREATMENT, fmt, load_all,
 )
 from muse_pipeline import config  # noqa: E402
-from muse_pipeline.markers import _make_epochs  # noqa: E402
+from muse_pipeline.markers import _make_epochs, epoch_psd_uv2  # noqa: E402
 
 MAIN = MARKERS[:3]  # Performance, Mood, Awareness (LZC is a companion, shown in the table only)
 STEP_LABELS = ["day 1", "day 2", "day 3", "day 4", "day 5", "day 6\n(pre)", "day 6\ntreatment", "post 1", "post 2", "post 3", "post 4"]
@@ -128,8 +128,8 @@ def epoch_series(fif: Path) -> dict:
 
     def band(ch, band_name):
         lo, hi = config.FREQ_BANDS_HZ[band_name]
-        s = ep.compute_psd(picks=[ch], fmin=lo, fmax=hi, verbose=False).get_data()
-        return s.mean(axis=-1)[:, 0] * 1e12
+        psd, _ = epoch_psd_uv2(ep, ch, lo, hi)
+        return psd.mean(axis=-1)
 
     out["cognition"] = None if config.COGNITION_CHANNEL in bads else band(config.COGNITION_CHANNEL, config.COGNITION_BAND)
     out["emotion"] = None if config.EMOTION_CHANNEL in bads else band(config.EMOTION_CHANNEL, config.EMOTION_BAND)
