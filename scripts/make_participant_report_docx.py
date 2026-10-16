@@ -236,7 +236,8 @@ def main() -> None:
     ], c["long_png"])
     chart_row(doc, "Pre / post comparison", [
         ("t", "Pre = baseline sessions (days 1-5 and the day-6 pre-treatment recording); post = the four post-treatment sessions. Black dots are individual sessions; the thick line is the average "
-              "(geometric for Performance and Mood).")
+              "(geometric for Performance and Mood); error bars show +/-1 standard deviation across sessions (multiplicative on the "
+              "log axis), and are omitted when there is only one session.")
     ] + cmp_parts(info), c["pp_png"])
     chart_row(doc, "Treatment metrics", [
         ("t", "Each marker over the treatment-day recording, per clean 4-second window, in raw units (Performance and Mood in "

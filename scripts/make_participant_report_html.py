@@ -100,7 +100,15 @@ def fig_prepost(me: pd.DataFrame) -> tuple[str, dict]:
             v = me[me["module_id"].isin(mods)][col].dropna()
             info[(col, grp)] = (geo(v, log) if len(v) else None, len(v))
             if len(v):
-                ax.hlines(geo(v, log), j - 0.3, j + 0.3, color=color, linewidth=4, alpha=alpha)
+                mean = geo(v, log)
+                ax.hlines(mean, j - 0.3, j + 0.3, color=color, linewidth=4, alpha=alpha)
+                if len(v) > 1:  # +/-1 SD across sessions (multiplicative for the log-scale markers)
+                    if log:
+                        sd = np.log10(v).std(ddof=1)
+                        lo, hi = mean / 10 ** sd, mean * 10 ** sd
+                    else:
+                        lo, hi = mean - v.std(ddof=1), mean + v.std(ddof=1)
+                    ax.errorbar(j, mean, yerr=[[mean - lo], [hi - mean]], color="k", capsize=5, linewidth=1.3, zorder=6)
                 ax.scatter(j + rng.uniform(-0.12, 0.12, len(v)), v, color="k", s=14, zorder=5)
                 ax.text(j, 1.02, f"n={len(v)}", transform=ax.get_xaxis_transform(), ha="center", fontsize=7)
             else:
@@ -278,7 +286,7 @@ def main() -> None:
 <div class="txt"><b>Key EEG findings:</b> Performance (AF8 broadband), Mood (AF7 alpha) and Awareness (permutation entropy, all 4 channels) across the protocol, each in its own units (Performance and Mood on a log axis). Dots are individual recordings and the line joins each step's average. The shaded band is this participant's own baseline range and the dotted line their baseline mean; the grey column marks the treatment-day session. Dates above the chart are each step's first recording. Gaps mean the marker could not be computed (a required electrode was flagged bad).</div>
 <div><img src="data:image/png;base64,{long_png}"></div></div>
 <div class="row"><h3>Pre / post comparison</h3>
-<div class="txt">Pre = baseline sessions (days 1–5 and the day-6 pre-treatment recording); post = the four post-treatment sessions. Black dots are individual sessions; the thick line is the average (geometric for Performance and Mood). <br><br>{'<br>'.join(cmp_txt(info, m[0], m[2]) for m in MAIN)}</div>
+<div class="txt">Pre = baseline sessions (days 1–5 and the day-6 pre-treatment recording); post = the four post-treatment sessions. Black dots are individual sessions; the thick line is the average (geometric for Performance and Mood); error bars show ±1 standard deviation across sessions (multiplicative on the log axis), and are omitted when there is only one session. <br><br>{'<br>'.join(cmp_txt(info, m[0], m[2]) for m in MAIN)}</div>
 <div><img src="data:image/png;base64,{pp_png}"></div></div>
 <div class="row"><h3>Treatment metrics</h3>
 <div class="txt">Each marker over the treatment-day recording, per clean 4-second window, in raw units (Performance and Mood in µV²/Hz on a log axis; Awareness 0–1). Windows with dropout, artifact or muscle contamination are removed, so the line has gaps.<br><br>{html.escape(tx_note)}</div>
