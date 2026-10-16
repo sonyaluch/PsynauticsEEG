@@ -181,17 +181,7 @@ def pct_txt(info, col):
     return f"<b>{SHORT[col]}:</b> pre {pre[0]:.0f}th percentile (n={pre[1]}), post {post[0]:.0f}th (n={post[1]})."
 
 
-def main() -> None:
-    ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--subject", required=True)
-    ap.add_argument("--label", default=None)
-    ap.add_argument("--marker-summary", type=Path, default=Path("output/batch_full/marker_summary.csv"))
-    ap.add_argument("--qc-summary", type=Path, default=Path("output/batch_full/batch_qc_summary.csv"))
-    ap.add_argument("--clean-raw-dir", type=Path, default=Path("output/batch_full/clean_raw"))
-    ap.add_argument("--clinicinfo-dir", type=Path, default=Path("data/clinicinfo"))
-    ap.add_argument("--participant-key", type=Path, default=Path("/Users/sonyaluchanskaya/Desktop/Psynautics/participant_key_CONFIDENTIAL.csv"))
-    ap.add_argument("--outdir", type=Path, default=Path("output/participant_reports"))
-    a = ap.parse_args()
+def collect(a):
     a.outdir.mkdir(parents=True, exist_ok=True)
     label = a.label or a.subject
 
@@ -249,6 +239,24 @@ def main() -> None:
         f"clinic/referral “{html.escape(c['ClinicDetails'] or 'not given')}”, additional “{html.escape(c['AdditionalInfo'] or 'none')}”.</p>"
         for dte, c in clin) or "<p>No clinic-info form found.</p>"
 
+    return locals()
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--subject", required=True)
+    ap.add_argument("--label", default=None)
+    ap.add_argument("--marker-summary", type=Path, default=Path("output/batch_full/marker_summary.csv"))
+    ap.add_argument("--qc-summary", type=Path, default=Path("output/batch_full/batch_qc_summary.csv"))
+    ap.add_argument("--clean-raw-dir", type=Path, default=Path("output/batch_full/clean_raw"))
+    ap.add_argument("--clinicinfo-dir", type=Path, default=Path("data/clinicinfo"))
+    ap.add_argument("--participant-key", type=Path, default=Path("/Users/sonyaluchanskaya/Desktop/Psynautics/participant_key_CONFIDENTIAL.csv"))
+    ap.add_argument("--outdir", type=Path, default=Path("output/participant_reports"))
+    a = ap.parse_args()
+    c = collect(a)
+    label, me, others, long_png, pp_png, info = (c[k] for k in ['label', 'me', 'others', 'long_png', 'pp_png', 'info'])
+    tx_png, tx_note, tx_date, clin = (c[k] for k in ['tx_png', 'tx_note', 'tx_date', 'clin'])
+    rec_rows, ch_txt, irregular, clin_html = (c[k] for k in ['rec_rows', 'ch_txt', 'irregular', 'clin_html'])
     first, last = me["datetime"].min(), me["datetime"].max()
     doc = f"""<!doctype html><html><head><meta charset="utf-8"><title>Study report {html.escape(label)}</title><style>{CSS}</style></head><body><div class="page">
 <div class="top"><b style="color:#3b3045;font-size:20px">PSYNAUTICS</b></div>
