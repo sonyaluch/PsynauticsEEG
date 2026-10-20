@@ -148,6 +148,11 @@ The export manifest (`eeg_summary.csv`) and `participant_key_CONFIDENTIAL.csv`
   See the comments in `config.py` for the evidence behind each.
 - Performance and Mood come from frontal dry electrodes and may include facial/jaw muscle activity, which 4 channels cannot fully separate
   from brain activity.
+- The app's own 0-10 scores (Conor's `lambda_function.py` and "Data Transform EEG score.xlsx", Oct 2026) are NOT reproduced here. The app
+  works from Muse's pre-computed band-power columns, which our raw exports don't contain: Mood = mean `Alpha_AF7`, Performance = mean of the
+  five AF8 band values, Awareness = permutation entropy of the 20 band-power time series; scores are Mood (x-1.7)*-10, Performance (x-1)*-10
+  (higher score = lower power) and Awareness x100 in the script but x10 in the spreadsheet. These differ from our confirmed definitions, and
+  the spreadsheet is not Gerard's data, so nothing could be validated. Reports therefore use our own units.
 - The recordings' protocol-step labels come from the app and are used as-is; some participants have repeated, missing or out-of-order steps.
 
 ## Tests
