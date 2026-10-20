@@ -29,6 +29,7 @@ import matplotlib.pyplot as plt
 import mne
 import numpy as np
 import pandas as pd
+from matplotlib.ticker import FuncFormatter, LogLocator, NullFormatter
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
@@ -38,16 +39,28 @@ from make_participant_report import (  # noqa: E402
 from muse_pipeline import config  # noqa: E402
 from muse_pipeline.markers import _make_epochs, epoch_psd_uv2  # noqa: E402
 
+# Charts are drawn at about the width they are displayed (6-7 in), so these sizes are close to what the reader sees.
+plt.rcParams.update({"font.size": 11, "axes.titlesize": 13, "axes.labelsize": 11.5, "xtick.labelsize": 11, "ytick.labelsize": 11, "legend.fontsize": 10})
+
 MAIN = MARKERS[:3]  # Performance, Mood, Awareness (LZC is a companion, shown in the table only)
 STEP_LABELS = ["day 1", "day 2", "day 3", "day 4", "day 5", "day 6\n(pre)", "day 6\ntreatment", "post 1", "post 2", "post 3", "post 4"]
+AXIS_LABELS = ["day 1", "day 2", "day 3", "day 4", "day 5", "day 6 pre", "day 6 treatment", "post 1", "post 2", "post 3", "post 4"]
 SHORT = {"cognition": "Performance", "emotion": "Mood", "awareness": "Awareness"}
 
 
 def b64(fig) -> str:
     buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=130, bbox_inches="tight")
+    fig.savefig(buf, format="png", dpi=150, bbox_inches="tight")
     plt.close(fig)
     return base64.b64encode(buf.getvalue()).decode()
+
+
+def log_axis(ax) -> None:
+    """Log y-axis with plain numbers (0.5, 1, 2) instead of 5 x 10^-1."""
+    ax.set_yscale("log")
+    ax.yaxis.set_major_locator(LogLocator(base=10, subs=(1, 2, 5), numticks=12))
+    ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{v:g}"))
+    ax.yaxis.set_minor_formatter(NullFormatter())
 
 
 def geo(vals, log: bool) -> float:
@@ -57,14 +70,14 @@ def geo(vals, log: bool) -> float:
 
 
 def fig_longitudinal(me: pd.DataFrame) -> str:
-    fig, axes = plt.subplots(3, 1, figsize=(9, 8.2), sharex=True)
+    fig, axes = plt.subplots(3, 1, figsize=(6.8, 7.8), sharex=True)
     tx_i = MODULE_ORDER.index(TREATMENT)
     for ax, (col, name, log, color, unit) in zip(axes, MAIN):
         d = me.dropna(subset=[col])
         ax.axvspan(tx_i - 0.5, tx_i + 0.5, color="#EEEEEE", zorder=0)
         if d.empty:
             ax.text(0.5, 0.5, f"{SHORT[col]}: not available in any recording (a required channel was flagged bad)",
-                    ha="center", va="center", transform=ax.transAxes, fontsize=8, color="#888")
+                    ha="center", va="center", transform=ax.transAxes, fontsize=10, color="#888", wrap=True)
             ax.set_yticks([])
             continue
         base = d[d["module_id"].isin(BASELINE)][col]
@@ -75,24 +88,26 @@ def fig_longitudinal(me: pd.DataFrame) -> str:
         g = d.groupby("step")[col].apply(lambda v: geo(v, log))
         ax.plot(g.index, g.values, "-o", color=color, markersize=5, label="Step average")
         if log:
-            ax.set_yscale("log")
+            log_axis(ax)
         else:
             ax.set_ylim(0, 1)  # bounded 0-1 measure: show the full scale so tiny differences don't look dramatic
-        ax.set_ylabel(f"{SHORT[col]}\n({unit or '0-1'})", fontsize=8)
-        ax.legend(fontsize=6, loc="upper right", ncol=4, frameon=False)
+        ax.set_ylabel(f"{SHORT[col]}\n({unit or '0-1'})")
     axes[-1].set_xlim(-0.5, 10.5)
     axes[-1].set_xticks(range(11))
-    axes[-1].set_xticklabels(STEP_LABELS, fontsize=7)
+    axes[-1].set_xticklabels(AXIS_LABELS, rotation=45, ha="right", rotation_mode="anchor")
     first = me.sort_values("datetime").groupby("step")["datetime"].first()
     top = axes[0].secondary_xaxis("top")
     top.set_xticks(list(first.index))
-    top.set_xticklabels([f"{t:%m-%d %H:%M}" for t in first], rotation=90, fontsize=6)
-    fig.tight_layout()
+    top.set_xticklabels([f"{t:%m-%d %H:%M}" for t in first], rotation=90, fontsize=9)
+    handles, labels = next(((h, l) for h, l in (a_.get_legend_handles_labels() for a_ in axes) if h), ([], []))
+    fig.tight_layout(rect=[0, 0.05, 1, 1])
+    if handles:
+        fig.legend(handles, labels, loc="lower center", ncol=2, frameon=False)
     return b64(fig)
 
 
 def fig_prepost(me: pd.DataFrame) -> tuple[str, dict]:
-    fig, axes = plt.subplots(1, 3, figsize=(10, 4.2))
+    fig, axes = plt.subplots(1, 3, figsize=(7.2, 4.6))
     info = {}
     rng = np.random.default_rng(0)
     for ax, (col, name, log, color, unit) in zip(axes, MAIN):
@@ -110,17 +125,17 @@ def fig_prepost(me: pd.DataFrame) -> tuple[str, dict]:
                         lo, hi = mean - v.std(ddof=1), mean + v.std(ddof=1)
                     ax.errorbar(j, mean, yerr=[[mean - lo], [hi - mean]], color="k", capsize=5, linewidth=1.3, zorder=6)
                 ax.scatter(j + rng.uniform(-0.12, 0.12, len(v)), v, color="k", s=14, zorder=5)
-                ax.text(j, 1.02, f"n={len(v)}", transform=ax.get_xaxis_transform(), ha="center", fontsize=7)
+                ax.text(j, 1.02, f"n={len(v)}", transform=ax.get_xaxis_transform(), ha="center", fontsize=10)
             else:
-                ax.text(j, 0.5, "n/a", transform=ax.get_xaxis_transform(), ha="center", fontsize=8, color="#888")
+                ax.text(j, 0.5, "n/a", transform=ax.get_xaxis_transform(), ha="center", fontsize=10, color="#888")
         if log:
-            ax.set_yscale("log")
+            log_axis(ax)
         else:
             ax.set_ylim(0, 1)
         ax.set_xlim(-0.6, 1.6)
         ax.set_xticks([0, 1])
-        ax.set_xticklabels(["Baseline", "Post-treatment"], fontsize=8)
-        ax.set_title(f"{SHORT[col]}\n({unit or '0-1'})", fontsize=9, pad=14)
+        ax.set_xticklabels(["Baseline", "Post"])
+        ax.set_title(f"{SHORT[col]}\n({unit or '0-1'})", pad=18)
     fig.tight_layout()
     return b64(fig), info
 
@@ -153,18 +168,18 @@ def epoch_series(fif: Path) -> dict:
 
 
 def fig_treatment(series: dict) -> str:
-    fig, axes = plt.subplots(3, 1, figsize=(9, 6), sharex=True)
+    fig, axes = plt.subplots(3, 1, figsize=(6.8, 6.6), sharex=True)
     for ax, (col, name, log, color, unit) in zip(axes, MAIN):
         v = series.get(col)
         if v is None:
-            ax.text(0.5, 0.5, f"{SHORT[col]}: not available (a required channel was flagged bad)", ha="center", va="center", transform=ax.transAxes, fontsize=8, color="#888")
+            ax.text(0.5, 0.5, f"{SHORT[col]}: not available (a required channel was flagged bad)", ha="center", va="center", transform=ax.transAxes, fontsize=10, color="#888", wrap=True)
             ax.set_yticks([])
         else:
             ax.plot(series["t"], v, "-o", color=color, markersize=3, linewidth=0.8)
             if log:
-                ax.set_yscale("log")
-            ax.set_ylabel(f"{SHORT[col]}\n({unit or '0-1'})", fontsize=7)
-    axes[-1].set_xlabel("Minutes into the treatment-day recording (each point = one clean 4 s window)", fontsize=8)
+                log_axis(ax)
+            ax.set_ylabel(f"{SHORT[col]}\n({unit or '0-1'})")
+    axes[-1].set_xlabel("Minutes into the treatment-day recording\n(each point = one clean 4 s window)")
     axes[-1].set_xlim(0, max(series["minutes"], 1))
     fig.tight_layout()
     return b64(fig)
@@ -172,23 +187,23 @@ def fig_treatment(series: dict) -> str:
 
 CSS = """
 body{margin:0;background:#f4f4f4;font-family:-apple-system,Helvetica,Arial,sans-serif;color:#222}
-.page{max-width:1000px;margin:20px auto;background:#fff}
-.top{padding:22px 36px;color:#888;font-size:13px}
+.page{max-width:1100px;margin:20px auto;background:#fff}
+.top{padding:22px 36px;color:#888;font-size:15px}
 .banner{background:#3b3045;color:#fff;text-align:center;padding:30px 20px}
-.banner h1{margin:0 0 8px;font-size:26px;letter-spacing:.5px}
-.banner div{font-size:14px}
-.info{padding:22px 36px;font-size:14px}
-.sec{background:#eeeeee;padding:14px 36px;font-size:22px;margin-top:10px}
-.row{display:grid;grid-template-columns:30% 70%;gap:20px;padding:18px 36px}
-.row h3{grid-column:1/3;margin:6px 0 0;font-weight:400;font-size:17px;letter-spacing:.3px;text-transform:uppercase}
-.txt{font-size:12.5px;color:#777;line-height:1.5}
-.txt b{color:#555}
+.banner h1{margin:0 0 8px;font-size:30px;letter-spacing:.5px}
+.banner div{font-size:16px}
+.info{padding:22px 36px;font-size:16px}
+.sec{background:#eeeeee;padding:14px 36px;font-size:25px;margin-top:10px}
+.row{display:grid;grid-template-columns:32% 68%;gap:20px;padding:18px 36px}
+.row h3{grid-column:1/3;margin:6px 0 0;font-weight:400;font-size:20px;letter-spacing:.3px;text-transform:uppercase}
+.txt{font-size:16px;color:#555;line-height:1.55}
+.txt b{color:#222}
 img{max-width:100%}
-table{border-collapse:collapse;width:100%;font-size:12px}
+table{border-collapse:collapse;width:100%;font-size:14.5px}
 th{background:#e6ebf5;text-align:left}
 th,td{border:1px solid #ddd;padding:5px 7px}
 tr:nth-child(even) td{background:#fafafa}
-.note{background:#fff7e6;border-left:4px solid #e0a030;padding:10px 14px;margin:12px 36px;font-size:12.5px}
+.note{background:#fff7e6;border-left:4px solid #e0a030;padding:10px 14px;margin:12px 36px;font-size:16px;line-height:1.5}
 """
 
 
@@ -277,7 +292,7 @@ def main() -> None:
     rec_rows, ch_txt, irregular, clin_html = (c[k] for k in ['rec_rows', 'ch_txt', 'irregular', 'clin_html'])
     first, last = me["datetime"].min(), me["datetime"].max()
     doc = f"""<!doctype html><html><head><meta charset="utf-8"><title>Study report {html.escape(label)}</title><style>{CSS}</style></head><body><div class="page">
-<div class="top"><b style="color:#3b3045;font-size:20px">PSYNAUTICS</b></div>
+<div class="top"><b style="color:#3b3045;font-size:22px">PSYNAUTICS</b></div>
 <div class="banner"><h1>INDIVIDUAL STUDY REPORT</h1><div>{html.escape(label)} &nbsp;|&nbsp; RECORDINGS: {first:%Y-%m-%d} to {last:%Y-%m-%d}</div></div>
 <div class="info"><b>RECORDINGS:</b> {len(me)} &nbsp;|&nbsp; <b>PROTOCOL STEPS COVERED:</b> {me['step'].nunique()} of 11 &nbsp;|&nbsp; <b>TREATMENT DAY:</b> {tx_date or 'n/a'} &nbsp;|&nbsp; <b>DEVICE:</b> Muse S (4-channel EEG) &nbsp;|&nbsp; <b>GENERATED:</b> {dt.date.today():%Y-%m-%d}</div>
 <div class="note"><b>Read this first.</b> This is one person's data. Each marker is shown in its own units and compared only with this participant's own baseline sessions. Nothing here is ranked or compared against other people, none of it says what is good or bad, and no statistical tests are possible with n=1. Data quality for this participant is limited — see the Data quality section.</div>

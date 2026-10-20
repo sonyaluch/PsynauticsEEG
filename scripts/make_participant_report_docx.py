@@ -112,7 +112,7 @@ def spacer(doc, pts=4):
 
 
 def section_bar(doc, title):
-    shaded_par(doc, "EEEEEE", [(title, {"size": 15})], before=5, after=5)
+    shaded_par(doc, "EEEEEE", [(title, {"size": 17})], before=5, after=5)
     spacer(doc)
 
 
@@ -120,22 +120,22 @@ def chart_row(doc, heading, text_parts, png_b64, caption=None):
     """Heading, then text on the left (2.1in) and chart on the right (5.0in)."""
     h = doc.add_paragraph()
     h.paragraph_format.space_after = Pt(2)
-    run(h, heading.upper(), size=11)
+    run(h, heading.upper(), size=13)
     t = doc.add_table(rows=1, cols=2)
-    fix_table(t, [2.1, 5.2])
+    fix_table(t, [1.95, 5.35])
     left, right = t.rows[0].cells
     p = left.paragraphs[0]
     for kind, txt in text_parts:
         if kind == "br":
             p = left.add_paragraph()
             continue
-        run(p, txt, bold=(kind == "b"), size=8.5, color=GREY)
+        run(p, txt, bold=(kind == "b"), size=10.5, color=GREY)
     rp = right.paragraphs[0]
     rp.alignment = WD_ALIGN_PARAGRAPH.CENTER
     if png_b64:
-        rp.add_run().add_picture(io.BytesIO(base64.b64decode(png_b64)), width=Inches(5.0))
+        rp.add_run().add_picture(io.BytesIO(base64.b64decode(png_b64)), width=Inches(5.3))
     else:
-        run(rp, "No treatment-day recording.", italic=True, size=9)
+        run(rp, "No treatment-day recording.", italic=True, size=10.5)
     spacer(doc, 6)
 
 
@@ -148,19 +148,19 @@ def data_table(doc, headers, rows, widths):
         c.width = Inches(widths[i])
         shade(c, "E6EBF5")
         c.paragraphs[0].text = ""
-        run(c.paragraphs[0], hd, bold=True, size=7)
+        run(c.paragraphs[0], hd, bold=True, size=8.5)
     for ri, row in enumerate(rows):
         cells = t.add_row().cells
         for i, v in enumerate(row):
             cells[i].width = Inches(widths[i])
             cells[i].paragraphs[0].text = ""
-            run(cells[i].paragraphs[0], str(v), size=7)
+            run(cells[i].paragraphs[0], str(v), size=8.5)
             if ri % 2:
                 shade(cells[i], "FAFAFA")
     fix_table(t, widths)
 
 
-def bullet(doc, text, size=9):
+def bullet(doc, text, size=10.5):
     p = doc.add_paragraph(style="List Bullet")
     run(p, text, size=size)
 
@@ -204,8 +204,8 @@ def main() -> None:
     first, last = me["datetime"].min(), me["datetime"].max()
     white = RGBColor(255, 255, 255)
     shaded_par(doc, PURPLE, [
-        ("INDIVIDUAL STUDY REPORT", {"bold": True, "size": 22, "color": white}),
-        (f"{label}  |  RECORDINGS: {first:%Y-%m-%d} to {last:%Y-%m-%d}", {"size": 10, "color": white, "newpar": True}),
+        ("INDIVIDUAL STUDY REPORT", {"bold": True, "size": 24, "color": white}),
+        (f"{label}  |  RECORDINGS: {first:%Y-%m-%d} to {last:%Y-%m-%d}", {"size": 12, "color": white, "newpar": True}),
     ], align=WD_ALIGN_PARAGRAPH.CENTER, before=14, after=14)
     spacer(doc, 6)
 
@@ -213,15 +213,15 @@ def main() -> None:
     for lab, val_ in [("RECORDINGS: ", str(len(me))), ("PROTOCOL STEPS COVERED: ", f"{me['step'].nunique()} of 11"),
                       ("TREATMENT DAY: ", c["tx_date"] or "n/a"), ("DEVICE: ", "Muse S (4-channel EEG)"),
                       ("GENERATED: ", f"{dt.date.today():%Y-%m-%d}")]:
-        run(p, lab, bold=True, size=9)
-        run(p, val_ + "   |   " if lab != "GENERATED: " else val_, size=9)
+        run(p, lab, bold=True, size=10.5)
+        run(p, val_ + "   |   " if lab != "GENERATED: " else val_, size=10.5)
 
     shaded_par(doc, "FFF7E6", [
-        ("Read this first. ", {"bold": True, "size": 9}),
+        ("Read this first. ", {"bold": True, "size": 11}),
         ("This is one person's data. Each marker is shown in its own units and compared only with this "
          "participant's own baseline sessions. Nothing here is ranked or compared against other people, none of it says what is "
          "good or bad, and no statistical tests are possible with n=1. Data quality for this participant is limited; see the "
-         "Data quality section.", {"size": 9})],
+         "Data quality section.", {"size": 11})],
         before=5, after=5)
     spacer(doc, 6)
 
@@ -256,7 +256,7 @@ def main() -> None:
                rows, [0.8, 1.0, 0.4, 0.6, 0.55, 0.9, 0.85, 0.85, 0.7, 0.65])
     p = doc.add_paragraph()
     run(p, "Performance and Mood in uV^2/Hz; Awareness and Lempel-Ziv are 0-1; n/a = not computable because a required channel was "
-           "flagged bad. Lempel-Ziv is an extra companion measure, not part of the Awareness definition.", italic=True, size=8, color=GREY)
+           "flagged bad. Lempel-Ziv is an extra companion measure, not part of the Awareness definition.", italic=True, size=9.5, color=GREY)
 
     section_bar(doc, "Data quality")
     bullet(doc, f"Channels flagged bad (recordings affected): {c['ch_txt']}.")
@@ -272,7 +272,7 @@ def main() -> None:
             bullet(doc, f"Form dated {dte}: dose \"{f['Dose'] or 'not given'}\", route \"{f['RouteOfAdmin'] or 'not given'}\", "
                         f"clinic/referral \"{f['ClinicDetails'] or 'not given'}\", additional \"{f['AdditionalInfo'] or 'none'}\".")
         p = doc.add_paragraph()
-        run(p, "Free text, self-reported and unverified; not used in any calculation.", italic=True, size=8, color=GREY)
+        run(p, "Free text, self-reported and unverified; not used in any calculation.", italic=True, size=9.5, color=GREY)
     else:
         bullet(doc, "No clinic-info form found.")
 
